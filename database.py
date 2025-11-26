@@ -1,0 +1,342 @@
+import sqlite3
+from datetime import datetime
+import os
+import time
+from contextlib import contextmanager
+
+class Database:
+    def __init__(self, db_path: str = 'data/crm.db'):
+        self.db_path = db_path
+        self._ensure_data_dir()
+        self.init_db()
+        
+    def _ensure_data_dir(self):
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir)
+            
+    def get_connection(self):
+        conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+    
+    @contextmanager
+    def get_db_context(self):
+        conn = self.get_connection()
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def init_db(self):
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            
+            c.execute('''CREATE TABLE IF NOT EXISTS products
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         name TEXT NOT NULL,
+                         width TEXT NOT NULL,
+                         description TEXT,
+                         category TEXT DEFAULT 'Hardwood',
+                         cost_price REAL DEFAULT 0.0,
+                         standard_price REAL DEFAULT 0.0,
+                         min_qty_discount INTEGER,
+                         discount_percentage REAL,
+                         discount_type TEXT,
+                         promotion_name TEXT,
+                         promotion_start_date TIMESTAMP,
+                         promotion_end_date TIMESTAMP,
+                         volume_discounts TEXT,
+                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+                         
+            c.execute('''CREATE TABLE IF NOT EXISTS suppliers
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         name TEXT NOT NULL UNIQUE,
+                         email TEXT NOT NULL UNIQUE,
+                         contact_info TEXT,
+                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+                         
+            c.execute('''CREATE TABLE IF NOT EXISTS price_requests
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         supplier_id INTEGER,
+                         status TEXT DEFAULT 'pending',
+                         sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                         response_data TEXT,
+                         FOREIGN KEY(supplier_id) REFERENCES suppliers(id))''')
+                         
+            c.execute('''CREATE TABLE IF NOT EXISTS quotes
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         customer_name TEXT NOT NULL,
+                         location TEXT NOT NULL,
+                         product_specs TEXT NOT NULL,
+                         quantity INTEGER,
+                         final_price REAL,
+                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            conn.commit()
+        finally:
+            conn.close()
+
+    def add_product(self, name: str, width: str, description: str = None, 
+                   category: str = "Hardwood", cost_price: float = 0.0,
+                   standard_price: float = 0.0, min_qty_discount: int = None,
+                   discount_percentage: float = None, discount_type: str = None,
+                   promotion_name: str = None, promotion_start_date: str = None,
+                   promotion_end_date: str = None, volume_discounts: str = None) -> int:
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            width_str = str(width).strip()
+            if width_str and not width_str.endswith('"'):
+                width_str = f'{width_str}"'
+            
+            std_price = standard_price if standard_price > 0 else cost_price
+            
+            c.execute('''INSERT INTO products (name, width, description, category, cost_price, standard_price,
+                                               min_qty_discount, discount_percentage, discount_type,
+                                               promotion_name, promotion_start_date, promotion_end_date, volume_discounts)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                     (name.strip(), width_str, description, category, float(cost_price), float(std_price),
+                      min_qty_discount, discount_percentage, discount_type,
+                      promotion_name, promotion_start_date, promotion_end_date, volume_discounts))
+            conn.commit()
+            result = c.lastrowid
+            return result
+        finally:
+            conn.close()
+
+    def add_supplier(self, name: str, email: str, contact_info: str = None) -> int:
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute('''INSERT INTO suppliers (name, email, contact_info)
+                        VALUES (?, ?, ?)''',
+                     (name.strip(), email.strip(), contact_info))
+            conn.commit()
+            return c.lastrowid
+        finally:
+            conn.close()
+
+    def update_product_price(self, name: str, new_price: float, width: str = None,
+                             discount_percentage: float = None, min_qty: int = None,
+                             promotion_name: str = None, volume_discounts: str = None) -> bool:
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            new_price = round(float(new_price), 2)
+            name = str(name).strip()
+            
+            if width:
+                width = str(width).strip()
+                if width and not width.endswith('"'):
+                    width = f'{width}"'
+                
+                c.execute('''SELECT id FROM products 
+                            WHERE name = ? AND width = ?''', (name, width))
+                if not c.fetchone():
+                    print(f"Product not found: {name} {width}")
+                    return False
+                
+                if discount_percentage is not None or promotion_name or volume_discounts:
+                    c.execute('''UPDATE products 
+                                SET standard_price = ?, cost_price = ?, discount_percentage = ?,
+                                    min_qty_discount = ?, promotion_name = ?, volume_discounts = ?,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE name = ? AND width = ?''',
+                             (new_price, new_price * 0.7 if discount_percentage else new_price,
+                              discount_percentage, min_qty, promotion_name, volume_discounts, name, width))
+                else:
+                    c.execute('''UPDATE products 
+                                SET standard_price = ?, cost_price = ?, updated_at = CURRENT_TIMESTAMP
+                                WHERE name = ? AND width = ?''',
+                             (new_price, new_price, name, width))
+            else:
+                c.execute('''SELECT id FROM products WHERE name = ?''', (name,))
+                if not c.fetchone():
+                    print(f"Product not found: {name}")
+                    return False
+                
+                if discount_percentage is not None or promotion_name or volume_discounts:
+                    c.execute('''UPDATE products 
+                                SET standard_price = ?, cost_price = ?, discount_percentage = ?,
+                                    min_qty_discount = ?, promotion_name = ?, volume_discounts = ?,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE name = ?''',
+                             (new_price, new_price * 0.7 if discount_percentage else new_price,
+                              discount_percentage, min_qty, promotion_name, volume_discounts, name))
+                else:
+                    c.execute('''UPDATE products 
+                                SET standard_price = ?, cost_price = ?, updated_at = CURRENT_TIMESTAMP
+                                WHERE name = ?''',
+                             (new_price, new_price, name))
+            
+            conn.commit()
+            rows_updated = c.rowcount
+            
+            if rows_updated > 0:
+                discount_str = f" ({discount_percentage}% off)" if discount_percentage else ""
+                promo_str = f" - {promotion_name}" if promotion_name else ""
+                print(f"Successfully updated {name} {width or ''} to ${new_price}{discount_str}{promo_str}")
+                return True
+            else:
+                print(f"No rows updated for {name} {width or ''}")
+                return False
+        except Exception as e:
+            print(f"Database error in update_product_price: {str(e)}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def get_products(self):
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute('''SELECT id, name, width, description, category, cost_price, standard_price, 
+                                discount_percentage, min_qty_discount, promotion_name, 
+                                promotion_start_date, promotion_end_date, volume_discounts, updated_at 
+                        FROM products ORDER BY name, width''')
+            return [dict(row) for row in c.fetchall()]
+        finally:
+            conn.close()
+
+    def is_promotion_active(self, promotion_start_date: str, promotion_end_date: str) -> bool:
+        """Check if promotion is currently active based on dates"""
+        try:
+            if not promotion_start_date or not promotion_end_date:
+                return False
+            
+            current_date = datetime.now()
+            
+            # Parse dates - handle various formats
+            start = datetime.fromisoformat(promotion_start_date.split()[0] if ' ' in promotion_start_date else promotion_start_date)
+            end = datetime.fromisoformat(promotion_end_date.split()[0] if ' ' in promotion_end_date else promotion_end_date)
+            
+            # Set end time to end of day
+            end = end.replace(hour=23, minute=59, second=59)
+            
+            is_active = start <= current_date <= end
+            return is_active
+        except Exception as e:
+            print(f"Error checking promotion activity: {str(e)}")
+            return False
+
+    def get_promotion_days_remaining(self, promotion_end_date: str) -> int:
+        """Calculate days remaining for a promotion"""
+        try:
+            if not promotion_end_date:
+                return 0
+            
+            current_date = datetime.now()
+            end = datetime.fromisoformat(promotion_end_date.split()[0] if ' ' in promotion_end_date else promotion_end_date)
+            
+            days_remaining = (end - current_date).days
+            return max(0, days_remaining)
+        except Exception as e:
+            print(f"Error calculating promotion days: {str(e)}")
+            return 0
+
+    def get_suppliers(self):
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute('''SELECT id, name, email, contact_info, created_at 
+                        FROM suppliers ORDER BY name''')
+            return [dict(row) for row in c.fetchall()]
+        finally:
+            conn.close()
+
+    def create_quote(self, customer_name: str, location: str, 
+                    product_specs: str, quantity: int, final_price: float) -> int:
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute('''INSERT INTO quotes
+                        (customer_name, location, product_specs, quantity, final_price)
+                        VALUES (?, ?, ?, ?, ?)''',
+                     (customer_name, location, product_specs, quantity, final_price))
+            conn.commit()
+            return c.lastrowid
+        finally:
+            conn.close()
+
+    def get_latest_quotes(self, limit: int = 50):
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute('''SELECT id, customer_name, location, product_specs, quantity, final_price, created_at
+                        FROM quotes ORDER BY created_at DESC LIMIT ?''', (limit,))
+            return [dict(row) for row in c.fetchall()]
+        finally:
+            conn.close()
+
+    def populate_sample_data(self):
+        try:
+            # Comprehensive mock data covering all important cases
+            sample_products = [
+                # Hardwood - Premium with multi-tier volume discounts
+                ("White Oak", '5"', "Premium grade white oak flooring - prefinished", "Hardwood", 4.25, 4.50, 500, 10.0, "bulk", "Fall Sale 2025", "2025-11-01", "2025-11-30", "500-999 sqft: 5% off, 1000-1499 sqft: 8% off, 1500+ sqft: 10% off"),
+                ("White Oak", '7"', "Wide plank white oak flooring - luxury grade", "Hardwood", 4.75, 5.00, 300, 12.0, "bulk", "Premium Wide Plank Special", "2025-11-15", "2025-12-15", "300-799 sqft: 7% off, 800-1199 sqft: 10% off, 1200+ sqft: 12% off"),
+                
+                # Hardwood - No promotion (edge case: NULL promotion)
+                ("Red Oak", '5"', "Traditional red oak flooring - natural finish", "Hardwood", 3.85, 4.10, None, None, None, None, None, None, None),
+                
+                # Hardwood - Long promotion period with contractor discount
+                ("Red Oak", '7"', "Classic red oak planks - hand-scraped texture", "Hardwood", 4.15, 4.40, 400, 8.0, "bulk", "Contractor Discount", "2025-11-01", "2026-01-31", "400-799 sqft: 5% off, 800-1199 sqft: 6% off, 1200+ sqft: 8% off"),
+                
+                # Premium Wood - No minimum quantity discount (edge case)
+                ("Maple", '4"', "Select grade maple flooring - Canadian sourced", "Hardwood", 4.50, 4.85, None, None, None, None, None, None, None),
+                
+                # Premium Wood - High discount percentage (tiered pricing)
+                ("Maple", '6"', "Wide plank maple flooring - engineered core", "Hardwood", 4.95, 5.25, 250, 15.0, "bulk", "Holiday Bundle Deal", "2025-12-01", "2025-12-31", "250-599 sqft: 8% off, 600-999 sqft: 12% off, 1000+ sqft: 15% off"),
+                
+                # Luxury - Ultra-premium with aggressive discounts
+                ("Walnut", '5"', "Premium walnut flooring - exotic grade", "Hardwood", 5.95, 6.50, 200, 18.0, "bulk", "Luxury Flooring Promotion", "2025-11-20", "2025-12-20", "200-399 sqft: 10% off, 400-599 sqft: 14% off, 600+ sqft: 18% off"),
+                
+                # Luxury - Exclusive with high minimums
+                ("Walnut", '7"', "Luxury wide plank walnut - hand-selected", "Hardwood", 6.75, 7.25, 150, 20.0, "bulk", "Exclusive Offer", "2025-11-01", "2025-11-30", "150-299 sqft: 12% off, 300-499 sqft: 16% off, 500+ sqft: 20% off"),
+                
+                # Eco-Friendly - Sustainability focus with moderate discounts
+                ("Bamboo", '5"', "Sustainable bamboo flooring - LEED eligible", "Eco", 3.95, 4.25, 600, 7.0, "bulk", "Eco-Friendly Initiative", "2025-11-01", "2025-12-31", "600-999 sqft: 4% off, 1000-1499 sqft: 5% off, 1500+ sqft: 7% off"),
+                
+                # Eco-Friendly - Long campaign with high minimums
+                ("Cork", '6"', "Natural cork planks - renewable resource", "Eco", 3.85, 4.15, 700, 9.0, "bulk", "Green Building Special", "2025-10-15", "2026-01-15", "700-999 sqft: 5% off, 1000-1499 sqft: 7% off, 1500+ sqft: 9% off"),
+                
+                # Budget Option - No discount (edge case: low-end pricing)
+                ("Laminate", '4"', "Commercial grade laminate - high durability", "Budget", 1.95, 2.15, None, None, None, None, None, None, None),
+            ]
+            
+            sample_suppliers = [
+                ("Premium Hardwoods Inc", "sales@premiumhardwoods.com", "USA's leading hardwood supplier - established 1995"),
+                ("EcoFloor Solutions", "info@ecofloorsolutions.com", "Sustainable flooring specialist - ISO certified"),
+                ("Classic Woods International", "orders@classicwoods.com", "Traditional wood specialists - global sourcing"),
+                ("Budget Flooring Direct", "contact@budgetflooring.com", "Cost-effective flooring solutions - bulk orders"),
+                ("Luxury Imports Ltd", "premium@luxuryimports.com", "Exotic wood imports - white-glove service")
+            ]
+            
+            conn = self.get_connection()
+            try:
+                c = conn.cursor()
+                c.execute("DELETE FROM quotes")
+                c.execute("DELETE FROM price_requests")
+                c.execute("DELETE FROM products")
+                c.execute("DELETE FROM suppliers")
+                c.execute("DELETE FROM sqlite_sequence")
+                conn.commit()
+            finally:
+                conn.close()
+                
+            # Add data with separate connections
+            for product in sample_products:
+                self.add_product(*product)
+                
+            for supplier in sample_suppliers:
+                self.add_supplier(*supplier)
+                    
+            return True
+            
+        except Exception as e:
+            print(f"Error populating sample data: {str(e)}")
+            return False

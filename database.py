@@ -35,6 +35,38 @@ class Database:
         try:
             c = conn.cursor()
             
+            # Users table - optimized for authentication
+            c.execute('''CREATE TABLE IF NOT EXISTS users
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                         email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                         password_hash TEXT NOT NULL,
+                         full_name TEXT,
+                         is_active INTEGER DEFAULT 1,
+                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                         last_login TIMESTAMP)''')
+            
+            # Sessions table - optimized for session management
+            c.execute('''CREATE TABLE IF NOT EXISTS sessions
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         user_id INTEGER NOT NULL,
+                         session_token TEXT NOT NULL UNIQUE,
+                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                         expires_at TIMESTAMP NOT NULL,
+                         last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                         ip_address TEXT,
+                         user_agent TEXT,
+                         remember_me INTEGER DEFAULT 0,
+                         is_active INTEGER DEFAULT 1,
+                         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)''')
+            
+            # Create indexes for performance
+            c.execute('''CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)''')
+            c.execute('''CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)''')
+            c.execute('''CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(session_token)''')
+            c.execute('''CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)''')
+            c.execute('''CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)''')
+            
             c.execute('''CREATE TABLE IF NOT EXISTS products
                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
                          name TEXT NOT NULL,
@@ -340,3 +372,146 @@ class Database:
         except Exception as e:
             print(f"Error populating sample data: {str(e)}")
             return False
+
+    # ===================== AUTHENTICATION METHODS =====================
+    
+    def register_user(self, username: str, email: str, password_hash: str, full_name: str = None) -> dict:
+        """Register a new user - returns user dict or error dict"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            
+            # Check if user already exists
+            c.execute("SELECT id FROM users WHERE username = ? OR email = ?", (username.lower(), email.lower()))
+            if c.fetchone():
+                return {"success": False, "error": "Username or email already exists"}
+            
+            c.execute('''INSERT INTO users (username, email, password_hash, full_name, is_active)
+                        VALUES (?, ?, ?, ?, 1)''',
+                     (username.lower(), email.lower(), password_hash, full_name))
+            conn.commit()
+            
+            user_id = c.lastrowid
+            return {"success": True, "user_id": user_id, "username": username}
+            
+        except Exception as e:
+            return {"success": False, "error": f"Registration error: {str(e)}"}
+        finally:
+            conn.close()
+
+    def get_user_by_username(self, username: str) -> dict:
+        """Get user by username for login"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute('''SELECT id, username, email, password_hash, full_name, is_active, last_login
+                        FROM users WHERE username = ? AND is_active = 1''', (username.lower(),))
+            result = c.fetchone()
+            return dict(result) if result else None
+        finally:
+            conn.close()
+
+    def create_session(self, user_id: int, session_token: str, remember_me: bool = False, 
+                      ip_address: str = None, user_agent: str = None) -> dict:
+        """Create a new session - 45 mins default, extended if remember_me"""
+        from datetime import datetime, timedelta
+        
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            
+            # Set expiration: 45 mins or 30 days if remember_me
+            if remember_me:
+                expires_at = datetime.now() + timedelta(days=30)
+            else:
+                expires_at = datetime.now() + timedelta(minutes=45)
+            
+            c.execute('''INSERT INTO sessions 
+                        (user_id, session_token, expires_at, ip_address, user_agent, remember_me)
+                        VALUES (?, ?, ?, ?, ?, ?)''',
+                     (user_id, session_token, expires_at, ip_address, user_agent, 1 if remember_me else 0))
+            conn.commit()
+            
+            # Update last_login
+            c.execute("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+            conn.commit()
+            
+            return {"success": True, "session_id": c.lastrowid, "expires_at": expires_at}
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+        finally:
+            conn.close()
+
+    def validate_session(self, session_token: str) -> dict:
+        """Validate a session token and return user info if valid"""
+        from datetime import datetime
+        
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            
+            # Get session and check expiration
+            c.execute('''SELECT s.id, s.user_id, s.expires_at, s.is_active, u.username, u.email, u.full_name
+                        FROM sessions s
+                        JOIN users u ON s.user_id = u.id
+                        WHERE s.session_token = ? AND s.is_active = 1''', (session_token,))
+            
+            result = c.fetchone()
+            if not result:
+                return {"valid": False, "error": "Session not found"}
+            
+            session = dict(result)
+            expires_at = datetime.fromisoformat(session['expires_at'])
+            
+            # Check if expired
+            if datetime.now() > expires_at:
+                # Invalidate expired session
+                c.execute("UPDATE sessions SET is_active = 0 WHERE id = ?", (session['id'],))
+                conn.commit()
+                return {"valid": False, "error": "Session expired"}
+            
+            # Update last activity
+            c.execute("UPDATE sessions SET last_activity = CURRENT_TIMESTAMP WHERE id = ?", (session['id'],))
+            conn.commit()
+            
+            return {
+                "valid": True,
+                "user_id": session['user_id'],
+                "username": session['username'],
+                "email": session['email'],
+                "full_name": session['full_name']
+            }
+            
+        finally:
+            conn.close()
+
+    def invalidate_session(self, session_token: str) -> bool:
+        """Invalidate/logout a session"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute("UPDATE sessions SET is_active = 0 WHERE session_token = ?", (session_token,))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error invalidating session: {str(e)}")
+            return False
+        finally:
+            conn.close()
+
+    def cleanup_expired_sessions(self):
+        """Clean up expired sessions (run periodically)"""
+        from datetime import datetime
+        
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute("DELETE FROM sessions WHERE expires_at < ?", (datetime.now(),))
+            conn.commit()
+            return c.rowcount
+        except Exception as e:
+            print(f"Error cleaning up sessions: {str(e)}")
+            return 0
+        finally:
+            conn.close()

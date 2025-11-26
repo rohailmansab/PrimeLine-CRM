@@ -51,11 +51,13 @@ from datetime import datetime
 import time
 import os
 from typing import Dict, Any
+import google.auth.exceptions
 
 # Local imports
 from database import Database
 from gemini_client import GeminiClient
 from email_handler import EmailHandler
+from auth_ui import render_authentication_gate
 from config import (
     GEMINI_API_KEY, DATABASE_PATH, EMAIL_TEMPLATES,
     THEME, SAMPLE_PRODUCTS, SAMPLE_SUPPLIERS
@@ -74,6 +76,14 @@ if not os.path.exists('data'):
     os.makedirs('data')
 
 db = Database(DATABASE_PATH)
+
+# ==================== AUTHENTICATION GATE ====================
+# This must be checked FIRST, before any other UI is rendered
+if not render_authentication_gate(db):
+    st.stop()  # Block access if not authenticated
+
+# Clean up expired sessions periodically
+db.cleanup_expired_sessions()
 
 try:
     conn = db.get_connection()
@@ -110,7 +120,6 @@ except RuntimeError as e:
         email_handler = None
 except Exception as e:
     # If authentication failed due to expired/revoked token, surface clear UI guidance
-    import google.auth.exceptions
     if isinstance(e, google.auth.exceptions.RefreshError) or 'expired' in str(e).lower() or 'revoked' in str(e).lower():
         st.error("Gmail authentication failed: token expired or revoked. Please re-authenticate.")
         st.info("To re-authenticate: delete 'token.json' in the project folder and reload the app. A browser window will open to complete OAuth.")
@@ -315,7 +324,42 @@ def render_sidebar():
             </div>
         ''', unsafe_allow_html=True)
         
+        # ==================== USER PROFILE SECTION ====================
+        st.divider()
+        st.markdown("### 👤 User Profile")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.write(f"**{st.session_state.full_name}**")
+            st.caption(st.session_state.email)
+            if st.session_state.remember_me:
+                st.caption("✅ Remember me active (30 days)")
+            else:
+                st.caption("⏱️ Session expires in 45 mins")
+        
+        with col2:
+            st.write("")  # Spacer
+        
+        # Sign Out Button
+        if st.button("🚪 Sign Out", use_container_width=True, type="secondary"):
+            try:
+                db.invalidate_session(st.session_state.session_token)
+                st.session_state.authenticated = False
+                st.session_state.session_token = None
+                st.session_state.user_id = None
+                st.session_state.username = None
+                st.session_state.email = None
+                st.session_state.full_name = None
+                st.session_state.remember_me = False
+                st.success("✅ You have been signed out successfully")
+                st.toast("Signed out", icon="👋")
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error during sign out: {str(e)}")
+        
         # Navigation Menu
+        st.divider()
         st.markdown('<p style="font-size: 1.2em; font-weight: 600; margin: 0 0 1em 0;" class="app-title">Navigation</p>', 
                    unsafe_allow_html=True)
                    

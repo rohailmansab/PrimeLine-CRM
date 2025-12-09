@@ -478,8 +478,15 @@ def render_quote_page():
         
         # Customer Selection
         from repositories.customer_repository import CustomerRepository
-        customer_repo = CustomerRepository(db.get_session())
-        customers, _ = customer_repo.list_customers(limit=1000)
+        from models.base import SessionLocal
+        
+        # Use a new session for the repository
+        session = SessionLocal()
+        try:
+            customer_repo = CustomerRepository(session)
+            customers, _ = customer_repo.list_customers(limit=1000)
+        finally:
+            session.close()
         
         customer_options = {f"{c.full_name} ({c.email})": c for c in customers}
         selected_customer_key = st.selectbox(
@@ -674,7 +681,7 @@ def render_analytics_page():
                             quotes_df['created_at'] = pd.to_datetime(quotes_df['created_at'])
                             st.write("Quote History")
                             chart_data = quotes_df.set_index('created_at')['final_price']
-                            st.line_chart(chart_data, use_container_width=True)
+                            st.line_chart(chart_data, width="stretch")
                         except Exception as e:
                             st.warning(f"Could not display chart: {str(e)}")
                     
@@ -682,7 +689,7 @@ def render_analytics_page():
                     display_quotes = quotes_df[['customer_name', 'location', 'quantity', 'final_price']].head(10).copy()
                     display_quotes.columns = ['Customer', 'Location', 'Sq Ft', 'Total']
                     display_quotes['Total'] = display_quotes['Total'].apply(format_currency)
-                    st.dataframe(display_quotes, hide_index=True, use_container_width=True)
+                    st.dataframe(display_quotes, hide_index=True, width="stretch")
             else:
                 st.info("ℹ️ No quotes generated yet. Create quotes to see statistics.")
         except Exception as e:
@@ -707,11 +714,11 @@ def render_analytics_page():
                 st.write("Current Product Prices")
                 
                 chart_data = products_df.set_index("Product")["Price/sqft"]
-                st.bar_chart(chart_data, use_container_width=True)
+                st.bar_chart(chart_data, width="stretch")
                 
                 display_df = products_df[["Name", "Width", "Price/sqft", "Last Updated"]].copy()
                 display_df["Price/sqft"] = display_df["Price/sqft"].apply(lambda x: f"${x:.2f}")
-                st.dataframe(display_df, hide_index=True, use_container_width=True)
+                st.dataframe(display_df, hide_index=True, width="stretch")
         else:
             st.info("ℹ️ No product data available. Add products to see analytics.")
     
@@ -771,7 +778,7 @@ def render_analytics_page():
         
         # Display with styling
         st.write("**Product Discount & Promotion Matrix**")
-        st.dataframe(insights_df, hide_index=True, use_container_width=True)
+        st.dataframe(insights_df, hide_index=True, width="stretch")
         
         # Summary statistics
         st.write("**Key Business Insights**")

@@ -280,4 +280,4 @@ def render_supplier_page(db, email_handler, gemini):
             styled_df = df[['name', 'width', 'cost_price', 'updated_at']].copy()
             styled_df.columns = ['Product', 'Width', 'Price/sqft', 'Last Updated']
             styled_df['Price/sqft'] = styled_df['Price/sqft'].apply(lambda x: f'${x:.2f}')
-            st.dataframe(styled_df, hide_index=True, use_container_width=True)
+            st.dataframe(styled_df, hide_index=True, width="stretch")

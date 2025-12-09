@@ -333,7 +333,7 @@ def render_customer_history_page():
                     "Total": f"${row_dict.get('final_price', 0):,.2f}"
                 })
             
-            st.dataframe(pd.DataFrame(history_data), use_container_width=True)
+            st.dataframe(pd.DataFrame(history_data), width="stretch")
         else:
             st.write("No purchase history found.")
             

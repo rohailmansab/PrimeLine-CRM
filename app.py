@@ -58,6 +58,7 @@ from database import Database
 from gemini_client import GeminiClient
 from email_handler import EmailHandler
 from auth_ui import render_authentication_gate
+from customer_ui import render_customer_page
 from config import (
     GEMINI_API_KEY, DATABASE_PATH, EMAIL_TEMPLATES,
     THEME, SAMPLE_PRODUCTS, SAMPLE_SUPPLIERS
@@ -1088,7 +1089,7 @@ def main():
     elif selected == "💰 Quote Generator":
         render_quote_page()
     elif selected == "👥 Customers":
-        st.switch_page("pages/01_Customers.py")
+        render_customer_page()
     else:
         render_analytics_page()
 

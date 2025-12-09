@@ -354,6 +354,7 @@ Note: This is an automated request. If you have any questions, please contact yo
             r'([A-Za-z\s]+?)\s+(\d+)\s*(?:inch|in|\"|\'\'|")\s+(?:now\s+)?(?:costs?|is|will\s+be)\s*\$?(\d+\.?\d*)',
             r'(?:updated?\s+)?(?:the\s+)?price\s+(?:of\s+)?(\d+)\s*(?:inch|in|\"|\'\'|")\s+(?:width\s+)?(?:of\s+)?([A-Za-z\s]+?)\s+(?:to|is|now|:)?\s*\$?(\d+\.?\d*)',
             r'([A-Za-z\s]+?)\s+(\d+)\s*(?:inch|in|\"|\'\'|")\s+(?:is\s+)?(?:now\s+)?(?:will\s+be\s+)?\$?(\d+\.?\d*)\s*(?:/sqft|per\s+sq\.?\s*ft\.?)?',
+            r'([A-Za-z\s]+?)\s+(\d+)\s*(?:inch|in|\"|\'\'|")\s*[:]\s*\$?(\d+\.?\d*)\s*(?:/sqft|per\s+sq\.?\s*ft\.?)?',
             r'(\d+)\s*(?:inch|in|\"|\'\'|")\s+([A-Za-z\s]+?)\s+(?:is\s+)?(?:now\s+)?(?:will\s+be\s+)?\$?(\d+\.?\d*)\s*(?:/sqft|per\s+sq\.?\s*ft\.?)?',
             r'([A-Za-z\s]+?)\s*[:|-]\s*\$?(\d+\.?\d*)\s*(?:/sqft|per\s+sq\.?\s*ft\.?)?',
             r'•\s*([A-Za-z\s]+?)(?:\s+(\d+)\s*(?:inch|in|\"|\'\'|"))?\\s*[:|-]?\s*\$?(\d+\.?\d*)',

@@ -397,7 +397,7 @@ def render_sidebar():
         
         selected = st.radio(
             "Go to",
-            ["📧 Supplier Management", "💰 Quote Generator", "📊 Analytics"]
+            ["📧 Supplier Management", "💰 Quote Generator", "📊 Analytics", "👥 Customers"]
         )
         
         st.divider()
@@ -546,7 +546,7 @@ def render_supplier_page():
                                 st.dataframe(
                                     styled_df,
                                     hide_index=True,
-                                    use_container_width=True
+                                    width="stretch"
                                 )            # Manual price update tester
             st.write("---")
             st.write("📝 Test Manual Update")
@@ -617,7 +617,7 @@ def render_supplier_page():
                                     st.dataframe(
                                         prices_df,
                                         hide_index=True,
-                                        use_container_width=True
+                                        width="stretch"
                                     )
                             else:
                                 st.error(f"Failed to update price for {product_display}. Please try again.")
@@ -1087,6 +1087,8 @@ def main():
         render_supplier_page()
     elif selected == "💰 Quote Generator":
         render_quote_page()
+    elif selected == "👥 Customers":
+        st.switch_page("pages/01_Customers.py")
     else:
         render_analytics_page()
 

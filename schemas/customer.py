@@ -7,6 +7,7 @@ class CustomerBase(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=100)
     email: EmailStr
     phone: Optional[str] = None
+    location: Optional[str] = None
     notes: Optional[str] = None
 
 class CustomerCreate(CustomerBase):
@@ -16,6 +17,7 @@ class CustomerUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=1, max_length=100)
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
+    location: Optional[str] = None
     notes: Optional[str] = None
 
 class CustomerRead(CustomerBase):

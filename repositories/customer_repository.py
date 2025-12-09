@@ -22,6 +22,7 @@ class CustomerRepository:
             full_name=customer.full_name,
             email=customer.email,
             phone=customer.phone,
+            location=customer.location,
             notes=customer.notes
         )
         self.db.add(db_customer)
@@ -83,6 +84,7 @@ class CustomerRepository:
                     Customer.full_name.ilike(search),
                     Customer.email.ilike(search),
                     Customer.phone.ilike(search),
+                    Customer.location.ilike(search),
                     Customer.notes.ilike(search)
                 )
             )

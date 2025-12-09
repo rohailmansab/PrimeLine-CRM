@@ -398,7 +398,7 @@ def render_sidebar():
         
         selected = st.radio(
             "Go to",
-            ["📧 Supplier Management", "💰 Quote Generator", "📊 Analytics", "👥 Customers"]
+            ["📧 Supplier Management", "💰 Quote Generator", "📊 Analytics", "👥 Customers", "📜 Customer History"]
         )
         
         st.divider()
@@ -777,9 +777,30 @@ def render_quote_page():
             key="width_select"
         )
         
+        # Customer Selection
+        from repositories.customer_repository import CustomerRepository
+        customer_repo = CustomerRepository(db.get_session())
+        customers, _ = customer_repo.list_customers(limit=1000)
+        
+        customer_options = {f"{c.full_name} ({c.email})": c for c in customers}
+        selected_customer_key = st.selectbox(
+            "Select Customer",
+            options=["New Customer"] + list(customer_options.keys()),
+            key="customer_select"
+        )
+        
+        default_name = ""
+        default_location = "Raleigh, NC"
+        
+        if selected_customer_key != "New Customer":
+            selected_customer = customer_options[selected_customer_key]
+            default_name = selected_customer.full_name
+            if selected_customer.location:
+                default_location = selected_customer.location
+        
         with st.form("quote_form"):
-            customer_name = st.text_input("Customer Name", placeholder="Enter customer name")
-            location = st.text_input("Location", "Raleigh, NC")
+            customer_name = st.text_input("Customer Name", value=default_name, placeholder="Enter customer name")
+            location = st.text_input("Location", value=default_location)
             quantity = st.number_input("Square Feet", 100, 10000, 1000)
             
             submitted = st.form_submit_button("Generate Quote", type="primary", use_container_width=True)
@@ -1090,6 +1111,9 @@ def main():
         render_quote_page()
     elif selected == "👥 Customers":
         render_customer_page()
+    elif selected == "📜 Customer History":
+        from customer_ui import render_customer_history_page
+        render_customer_history_page()
     else:
         render_analytics_page()
 

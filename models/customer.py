@@ -50,6 +50,7 @@ class Customer(Base):
     full_name = Column(String(255), index=True, nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     phone = Column(String(50), nullable=True)
+    location = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
     
     # Soft delete

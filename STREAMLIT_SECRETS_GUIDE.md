@@ -17,7 +17,7 @@ Configure Gmail OAuth token in Streamlit Cloud Secrets
 
 ```toml
 # Google Gemini API Key (REQUIRED for AI features)
-GEMINI_API_KEY = "AIzaSy___YOUR_GEMINI_API_KEY_HERE___"
+GEMINI_API_KEY = "AIzaSyAD0aTHqmURI7i--_IwUkK3UqpBtgEAaiw"
 
 # Gmail OAuth Token (For Email Features)
 # Copy values from your local token.json file

@@ -263,27 +263,30 @@ def render_customer_history_page():
     st.divider()
     
     # Fetch Quotes for this customer
-    # Note: We need a method to get quotes by customer. 
-    # Assuming we can query the quotes table directly or via a repository.
-    # For now, we'll use a direct SQL query or helper if available, 
-    # but since we are in the UI, let's use the session from repo.
-    
     try:
-        # This assumes a 'quotes' table exists and has 'customer_name' or similar.
-        # Ideally we should link by ID, but the current quote system uses names.
-        # We'll match by name for now as per existing app logic.
-        from sqlalchemy import text
+        # Import Database to access the SQLite database directly
+        from database import Database
+        from config import DATABASE_PATH
+        import sqlite3
+        
+        # Get direct database connection (not SQLAlchemy session)
+        db = Database(DATABASE_PATH)
+        conn = db.get_connection()
+        cursor = conn.cursor()
         
         # Buying Power / Insights
         st.subheader("💰 Buying Power & Insights")
         
         # Calculate metrics
-        query = text("SELECT COUNT(*) as count, SUM(final_price) as total_spend, AVG(final_price) as avg_order FROM quotes WHERE customer_name = :name")
-        result = repo.db.execute(query, {"name": selected_customer.full_name}).fetchone()
+        cursor.execute(
+            "SELECT COUNT(*) as count, SUM(final_price) as total_spend, AVG(final_price) as avg_order FROM quotes WHERE customer_name = ?",
+            (selected_customer.full_name,)
+        )
+        result = cursor.fetchone()
         
         count = result[0] or 0
-        total_spend = result[1] or 0
-        avg_order = result[2] or 0
+        total_spend = result[1] or 0.0
+        avg_order = result[2] or 0.0
         
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Quotes/Orders", count)
@@ -308,35 +311,33 @@ def render_customer_history_page():
         
         st.subheader("📜 Purchase History")
         
-        history_query = text("SELECT * FROM quotes WHERE customer_name = :name ORDER BY created_at DESC")
-        history = repo.db.execute(history_query, {"name": selected_customer.full_name}).fetchall()
+        cursor.execute(
+            "SELECT id, customer_name, location, product_specs, quantity, final_price, created_at FROM quotes WHERE customer_name = ? ORDER BY created_at DESC",
+            (selected_customer.full_name,)
+        )
+        history = cursor.fetchall()
         
         if history:
             # Convert to dicts for dataframe
             history_data = []
             for row in history:
-                # Map row to dict based on column names (assuming standard SQLAlchemy row)
-                # If row is tuple-like, we might need index. 
-                # But .fetchall() with text() usually returns Row objects which are accessible by key.
-                # Let's try to be safe.
-                try:
-                    row_dict = row._mapping
-                except AttributeError:
-                    # Fallback for older SQLAlchemy
-                    row_dict = dict(row)
-                
                 history_data.append({
-                    "Date": row_dict.get('created_at'),
-                    "Location": row_dict.get('location'),
-                    "Product Specs": row_dict.get('product_specs'),
-                    "Quantity": row_dict.get('quantity'),
-                    "Total": f"${row_dict.get('final_price', 0):,.2f}"
+                    "Date": row[6],  # created_at
+                    "Location": row[2],  # location
+                    "Product Specs": row[3],  # product_specs
+                    "Quantity": row[4],  # quantity
+                    "Total": f"${row[5]:,.2f}"  # final_price
                 })
             
-            st.dataframe(pd.DataFrame(history_data), width="stretch")
+            st.dataframe(pd.DataFrame(history_data), use_container_width=True)
         else:
             st.write("No purchase history found.")
+        
+        # Close connection
+        conn.close()
             
     except Exception as e:
         st.error(f"Error loading history: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
 

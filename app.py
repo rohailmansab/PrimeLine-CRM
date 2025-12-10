@@ -78,6 +78,14 @@ if not os.path.exists('data'):
 
 db = Database(DATABASE_PATH)
 
+# Initialize SQLAlchemy tables (for customers, etc.)
+try:
+    from models.base import Base, engine
+    Base.metadata.create_all(bind=engine)
+    print("✓ SQLAlchemy tables initialized")
+except Exception as e:
+    print(f"SQLAlchemy table initialization warning: {e}")
+
 # ==================== AUTHENTICATION GATE ====================
 # This must be checked FIRST, before any other UI is rendered
 if not render_authentication_gate(db):

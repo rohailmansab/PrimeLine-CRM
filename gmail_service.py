@@ -38,6 +38,7 @@ class GmailService:
     
     def _is_headless(self) -> bool:
         """Check if running in a headless environment (Streamlit Cloud, etc)."""
+        import os
         headless_indicators = [
             'STREAMLIT_SERVER_HEADLESS',
             'CI',
@@ -46,31 +47,70 @@ class GmailService:
             'RENDER',
             'HEROKU_APP_NAME'
         ]
-        return any(os.environ.get(indicator) for indicator in headless_indicators)
+        is_headless = any(os.environ.get(indicator) for indicator in headless_indicators)
+        if is_headless:
+            print(f"✓ Headless environment detected: {[k for k in headless_indicators if os.environ.get(k)]}")
+        return is_headless
     
     def _load_token_from_streamlit_secrets(self) -> bool:
         """Attempt to load Gmail token from Streamlit secrets (for Cloud deployment)."""
         try:
             import streamlit as st
-            if hasattr(st, 'secrets') and 'gmail_token_b64' in st.secrets:
-                import base64
-                import json
+            import base64
+            import json
+            
+            print("🔍 Attempting to load Gmail token from Streamlit secrets...")
+            
+            # Check if Streamlit secrets are available
+            if not hasattr(st, 'secrets'):
+                print("❌ Streamlit secrets not available (not running in Streamlit?)")
+                return False
+            
+            # Method 1: Load from base64 encoded token
+            if 'gmail_token_b64' in st.secrets:
+                print("✓ Found gmail_token_b64 in secrets")
                 token_b64 = st.secrets['gmail_token_b64']
                 token_json = base64.b64decode(token_b64).decode('utf-8')
                 with open('token.json', 'w') as f:
                     f.write(token_json)
-                print("✓ Loaded Gmail token from Streamlit secrets")
+                print("✓ Successfully loaded Gmail token from Streamlit secrets (base64)")
                 return True
+            
+            # Method 2: Load from [gmail_token] section
+            if 'gmail_token' in st.secrets:
+                print("✓ Found [gmail_token] section in secrets")
+                token_dict = dict(st.secrets['gmail_token'])
+                with open('token.json', 'w') as f:
+                    json.dump(token_dict, f, indent=2)
+                print("✓ Successfully loaded Gmail token from Streamlit secrets ([gmail_token])")
+                return True
+            
+            print("❌ No Gmail token found in secrets (checked: gmail_token_b64, gmail_token)")
+            available_secrets = list(st.secrets.keys())
+            print(f"ℹ️ Available secrets: {available_secrets}")
+            
         except Exception as e:
-            print(f"ℹ️ Could not load token from Streamlit secrets: {e}")
+            print(f"❌ Error loading token from Streamlit secrets: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+        
         return False
     
     def _authenticate(self):
         # Try to load existing credentials
         try:
             # First, try to load from Streamlit secrets (for Cloud deployment)
-            if self._is_headless() and not os.path.exists('token.json'):
-                self._load_token_from_streamlit_secrets()
+            # Always attempt to load from secrets in Streamlit environment
+            try:
+                import streamlit as st
+                if hasattr(st, 'secrets'):
+                    print("🔍 Streamlit environment detected, attempting secrets load...")
+                    if not os.path.exists('token.json') or self._is_headless():
+                        self._load_token_from_streamlit_secrets()
+            except ImportError:
+                # Not running in Streamlit
+                if self._is_headless() and not os.path.exists('token.json'):
+                    self._load_token_from_streamlit_secrets()
             
             if os.path.exists('token.json'):
                 try:

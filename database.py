@@ -129,11 +129,14 @@ class Database:
             c.execute('''CREATE INDEX IF NOT EXISTS idx_quotes_user_id ON quotes(user_id)''')
             
             # Migration: Add user_id column to existing customers table if it doesn't exist
-            try:
-                c.execute("SELECT user_id FROM customers LIMIT 1")
-            except:
-                c.execute("ALTER TABLE customers ADD COLUMN user_id INTEGER REFERENCES users(id)")
-                print("✓ Added user_id column to customers table")
+            # Check if table exists first (since it might be managed by SQLAlchemy)
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='customers'")
+            if c.fetchone():
+                try:
+                    c.execute("SELECT user_id FROM customers LIMIT 1")
+                except:
+                    c.execute("ALTER TABLE customers ADD COLUMN user_id INTEGER REFERENCES users(id)")
+                    print("✓ Added user_id column to customers table")
             
             # Migration: Add is_active column to suppliers table if it doesn't exist
             try:

@@ -385,6 +385,14 @@ def render_signup_page(db: Database) -> bool:
                 for key, requirement in requirements.items():
                     st.caption(f"✓ {requirement}")
             
+            # Admin Code (Optional)
+            admin_code = st.text_input(
+                "Admin Code (Optional)",
+                type="password",
+                placeholder="Enter admin code if applicable",
+                help="Leave blank if you are not an admin"
+            )
+            
             agree_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy", value=False)
             
             submitted = st.form_submit_button(
@@ -407,11 +415,32 @@ def render_signup_page(db: Database) -> bool:
                     st.error(f"❌ {error}")
                     return False
                 
+                # Check admin code
+                is_admin_signup = False
+                if admin_code:
+                    if admin_code == "admin123":  # Simple hardcoded check for now
+                        is_admin_signup = True
+                        st.toast("Admin privileges granted!", icon="👑")
+                    else:
+                        st.warning("⚠️ Invalid Admin Code - Account will be created as standard user")
+                
                 # Hash password
                 password_hash = AuthHandler.hash_password(password)
                 
                 # Register user
                 result = db.register_user(username, email, password_hash, full_name)
+                
+                if result['success']:
+                    # If admin code was valid, update the user to be admin immediately
+                    if is_admin_signup:
+                        try:
+                            conn = db.get_connection()
+                            c = conn.cursor()
+                            c.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (result['user_id'],))
+                            conn.commit()
+                            conn.close()
+                        except Exception as e:
+                            print(f"Error promoting user to admin: {e}")
                 
                 if result['success']:
                     # Auto-login after signup

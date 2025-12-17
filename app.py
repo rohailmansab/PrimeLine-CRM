@@ -864,30 +864,34 @@ def render_analytics_page():
                                 # Call AI logic
                                 market_data = get_market_data(lookup_zip, product_with_price)
                                 
-                                if gemini and gemini.initialized:
-                                    quote_data = gemini.calculate_quote(
-                                        base_price, 
-                                        market_data,
-                                        product_name=selected_product,
-                                        width=selected_width,
-                                        location=lookup_zip
-                                    )
-                                    
-                                    if quote_data:
-                                        st.success("✅ AI Analysis Complete")
+                                if gemini:
+                                    if gemini.initialized:
+                                        quote_data = gemini.calculate_quote(
+                                            base_price, 
+                                            market_data,
+                                            product_name=selected_product,
+                                            width=selected_width,
+                                            location=lookup_zip
+                                        )
                                         
-                                        # Display Results
-                                        res_col1, res_col2 = st.columns(2)
-                                        with res_col1:
-                                            st.metric("Suggested Retail Price", f"${quote_data.get('suggested_retail_price', 0):.2f}", help="Market rate for end consumers")
-                                        with res_col2:
-                                            st.metric("Suggested Dealer Price", f"${quote_data.get('suggested_dealer_price', 0):.2f}", help="Market rate for contractors/dealers")
-                                        
-                                        st.info(f"📊 **Analysis Context:** {selected_product} ({selected_width}) in {lookup_zip} | Generated at {datetime.now().strftime('%H:%M:%S')}")
+                                        if quote_data:
+                                            st.success("✅ AI Analysis Complete")
+                                            
+                                            # Display Results
+                                            res_col1, res_col2 = st.columns(2)
+                                            with res_col1:
+                                                st.metric("Suggested Retail Price", f"${quote_data.get('suggested_retail_price', 0):.2f}", help="Market rate for end consumers")
+                                            with res_col2:
+                                                st.metric("Suggested Dealer Price", f"${quote_data.get('suggested_dealer_price', 0):.2f}", help="Market rate for contractors/dealers")
+                                            
+                                            st.info(f"📊 **Analysis Context:** {selected_product} ({selected_width}) in {lookup_zip} | Generated at {datetime.now().strftime('%H:%M:%S')}")
+                                        else:
+                                            st.error("AI could not generate pricing data. Please try again.")
                                     else:
-                                        st.error("AI could not generate pricing data. Please try again.")
+                                        st.error(f"❌ Gemini AI initialization failed: {gemini.init_error}")
+                                        st.info("Please check your API key and internet connection.")
                                 else:
-                                    st.error("Gemini AI is not initialized. Please check your API key.")
+                                    st.error("❌ Gemini API Key is missing. Please check your .env file.")
                             except Exception as e:
                                 st.error(f"Error during AI lookup: {str(e)}")
             else:

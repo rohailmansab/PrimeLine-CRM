@@ -688,83 +688,104 @@ def render_quote_page():
                     total = round(selling_price * quantity, 2)
                     
                     # Create quote with user_id and pending status
+                    # Create quote with user_id and pending status
                     user_id = st.session_state.get('user_id')
                     db.create_quote(
                         customer_name, location,
                         json.dumps({"product": product, "width": width}),
                         quantity, total, user_id=user_id,
-                        status='pending_admin_approval'
+                        status='pending_admin_approval',
+                        ai_retail_price=suggested_retail,
+                        ai_dealer_price=suggested_dealer,
+                        ai_zip_code=location,
+                        ai_generated_at=datetime.now()
                     )
                     
                     st.success("✓ Quote Submitted for Approval!")
-                    st.info("Your quote has been sent to the admin for review. You will be notified once it is approved.")
-                    st.write("---")
                     
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Price per sqft", format_currency(selling_price))
-                        st.metric("Quantity", f"{quantity} sqft")
-                    with col2:
-                        st.metric("Total Amount", format_currency(total))
-                        st.metric("Margin", f"{margin:.1f}%")
-                    with col3:
-                        if promo_active and discount_pct and discount_pct > 0:
-                            st.metric("Discount Applied", f"🎉 {discount_pct}%")
-                            st.caption(f"📌 {promo_name}")
-                            days_left = db.get_promotion_days_remaining(end_date)
-                            st.caption(f"⏰ {days_left} days left")
-                        else:
-                            st.metric("Pricing", "✓ Standard Rate")
+                    is_admin = st.session_state.get('role') in ['admin', 'super_admin']
                     
-                    with st.expander("📋 Detailed Quote Breakdown"):
-                        st.write(f"**Customer:** {customer_name}")
-                        st.write(f"**Location:** {location}")
-                        st.write(f"**Product:** {width} {product}")
-                        st.write(f"**Standard Price (per sqft):** {format_currency(standard_price)}")
-                        if promo_active and discount_pct and discount_pct > 0:
-                            discounted_price = standard_price * (1 - discount_pct / 100)
-                            st.write(f"**Applied Discount:** {discount_pct}% = {format_currency(discounted_price)}")
-                        st.write(f"**Selling Price (per sqft):** {format_currency(selling_price)}")
-                        st.write(f"**Market Analysis:** {market_data.get('demand_indicator', 'N/A')}")
+                    if is_admin:
+                        st.info("Your quote has been sent to the admin for review. You will be notified once it is approved.")
+                        st.write("---")
                         
-                        # Admin-only visibility for AI suggested prices
-                        if st.session_state.get('role') in ['admin', 'super_admin']:
-                            st.divider()
-                            st.markdown("### 🔒 Admin Insights (AI Suggested)")
-                            ac1, ac2 = st.columns(2)
-                            with ac1:
-                                if suggested_retail:
-                                    st.metric("Suggested Retail Price", format_currency(suggested_retail), help="Market rate for end consumers")
-                            with ac2:
-                                if suggested_dealer:
-                                    st.metric("Suggested Dealer Price", format_currency(suggested_dealer), help="Market rate for contractors/dealers")
-                        
-                        if matching_product:
-                            st.divider()
-                            st.subheader("💰 Promotion & Discount Details")
-                            
-                            volume_discounts = matching_product.get('volume_discounts')
-                            
-                            if discount_pct and discount_pct > 0:
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.write(f"**🎯 Discount Rate:** {discount_pct}%")
-                                    if promo_name:
-                                        st.write(f"**📌 Promotion:** {promo_name}")
-                                    if start_date and end_date:
-                                        days_left = db.get_promotion_days_remaining(end_date)
-                                        status_icon = "✅ ACTIVE" if promo_active else "⏱️ ENDED"
-                                        st.write(f"**📅 Status:** {status_icon}")
-                                        if promo_active:
-                                            st.write(f"**⏰ Days Remaining:** {days_left} days")
-                                        st.write(f"**Valid:** {start_date.split()[0]} to {end_date.split()[0]}")
-                                
-                                with col2:
-                                    if volume_discounts:
-                                        st.write(f"**📊 Volume Tiers:**")
-                                        st.caption(volume_discounts)
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Price per sqft", format_currency(selling_price))
+                            st.metric("Quantity", f"{quantity} sqft")
+                        with col2:
+                            st.metric("Total Amount", format_currency(total))
+                            st.metric("Margin", f"{margin:.1f}%")
+                        with col3:
+                            if promo_active and discount_pct and discount_pct > 0:
+                                st.metric("Discount Applied", f"🎉 {discount_pct}%")
+                                st.caption(f"📌 {promo_name}")
+                                days_left = db.get_promotion_days_remaining(end_date)
+                                st.caption(f"⏰ {days_left} days left")
                             else:
-                                st.info("ℹ️ No active discounts on this product")
+                                st.metric("Pricing", "✓ Standard Rate")
+                        
+                        with st.expander("📋 Detailed Quote Breakdown"):
+                            st.write(f"**Customer:** {customer_name}")
+                            st.write(f"**Location:** {location}")
+                            st.write(f"**Product:** {width} {product}")
+                            st.write(f"**Standard Price (per sqft):** {format_currency(standard_price)}")
+                            if promo_active and discount_pct and discount_pct > 0:
+                                discounted_price = standard_price * (1 - discount_pct / 100)
+                                st.write(f"**Applied Discount:** {discount_pct}% = {format_currency(discounted_price)}")
+                            st.write(f"**Selling Price (per sqft):** {format_currency(selling_price)}")
+                            st.write(f"**Market Analysis:** {market_data.get('demand_indicator', 'N/A')}")
+                            
+                            # Backend Enforcement: Sanitize AI prices for non-admins (Redundant here as block is admin-only, but good practice)
+                            if not is_admin:
+                                suggested_retail = None
+                                suggested_dealer = None
+                            
+                            # Admin-only visibility for AI suggested prices
+                            st.divider()
+                            st.markdown("### 🤖 AI Market Pricing (Zip-Code Based)")
+                            
+                            with st.container(border=True):
+                                st.caption(f"📍 **Zip Code Used:** {location}")
+                                
+                                ac1, ac2 = st.columns(2)
+                                with ac1:
+                                    if suggested_retail:
+                                        st.metric("Suggested Retail Price", format_currency(suggested_retail), help="Market rate for end consumers")
+                                with ac2:
+                                    if suggested_dealer:
+                                        st.metric("Suggested Dealer Price", format_currency(suggested_dealer), help="Market rate for contractors/dealers")
+                                
+                                st.caption("📝 *Note: For reference only. Supplier pricing remains the source of truth.*")
+                            
+                            if matching_product:
+                                st.divider()
+                                st.subheader("💰 Promotion & Discount Details")
+                                
+                                volume_discounts = matching_product.get('volume_discounts')
+                                
+                                if discount_pct and discount_pct > 0:
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.write(f"**🎯 Discount Rate:** {discount_pct}%")
+                                        if promo_name:
+                                            st.write(f"**📌 Promotion:** {promo_name}")
+                                        if start_date and end_date:
+                                            days_left = db.get_promotion_days_remaining(end_date)
+                                            status_icon = "✅ ACTIVE" if promo_active else "⏱️ ENDED"
+                                            st.write(f"**📅 Status:** {status_icon}")
+                                            if promo_active:
+                                                st.write(f"**⏰ Days Remaining:** {days_left} days")
+                                            st.write(f"**Valid:** {start_date.split()[0]} to {end_date.split()[0]}")
+                                    with col2:
+                                        if volume_discounts:
+                                            st.write("**📦 Volume Discounts:**")
+                                            st.info(volume_discounts)
+                                else:
+                                    if volume_discounts:
+                                        st.info(f"📦 **Volume Discounts Available:** {volume_discounts}")
+                    else:
+                        st.info("Quote submitted for admin review")
                         
                 except Exception as e:
                     st.error(f"Error generating quote: {str(e)}")

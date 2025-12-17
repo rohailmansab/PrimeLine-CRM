@@ -238,6 +238,16 @@ class Database:
                 c.execute("ALTER TABLE products ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)")
                 print("✓ Added supplier_id column to products table")
 
+            # Migration: Add AI pricing columns to quotes table
+            try:
+                c.execute("SELECT ai_retail_price FROM quotes LIMIT 1")
+            except:
+                c.execute("ALTER TABLE quotes ADD COLUMN ai_retail_price REAL")
+                c.execute("ALTER TABLE quotes ADD COLUMN ai_dealer_price REAL")
+                c.execute("ALTER TABLE quotes ADD COLUMN ai_zip_code TEXT")
+                c.execute("ALTER TABLE quotes ADD COLUMN ai_generated_at TIMESTAMP")
+                print("✓ Added AI pricing columns to quotes table")
+
             # Sync History table for automated tasks
             c.execute('''CREATE TABLE IF NOT EXISTS sync_history
                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -479,15 +489,17 @@ class Database:
         finally:
             conn.close()
 
-    def create_quote(self, customer_name: str, location: str, 
-                    product_specs: str, quantity: int, final_price: float, user_id: int = None, status: str = 'pending_admin_approval') -> int:
+    def create_quote(self, customer_name, location, product_specs, quantity, total_price, user_id=None, status='pending_admin_approval',
+                    ai_retail_price=None, ai_dealer_price=None, ai_zip_code=None, ai_generated_at=None):
         conn = self.get_connection()
         try:
             c = conn.cursor()
-            c.execute('''INSERT INTO quotes
-                        (customer_name, location, product_specs, quantity, final_price, user_id, status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                     (customer_name, location, product_specs, quantity, final_price, user_id, status))
+            c.execute('''INSERT INTO quotes 
+                        (customer_name, location, product_specs, quantity, total_price, user_id, status,
+                         ai_retail_price, ai_dealer_price, ai_zip_code, ai_generated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (customer_name, location, product_specs, quantity, total_price, user_id, status,
+                       ai_retail_price, ai_dealer_price, ai_zip_code, ai_generated_at))
             conn.commit()
             return c.lastrowid
         finally:

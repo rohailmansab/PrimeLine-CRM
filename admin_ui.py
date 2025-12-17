@@ -106,7 +106,7 @@ def render_user_management_tab(db: Database):
                     key=f"role_select_{user_id}"
                 )
                 
-                if new_role != current_role:
+                if new_role != target_user_role:
                     if st.button(f"Update Role to {new_role}", key=f"update_role_{user_id}"):
                         if db.update_user_role(user_id, new_role):
                             st.success(f"Updated {user['username']} to {new_role}")

@@ -48,9 +48,12 @@ class Customer(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     full_name = Column(String(255), index=True, nullable=False)
+    business_name = Column(String(255), nullable=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
-    phone = Column(String(50), nullable=True)
-    location = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=False) # Made mandatory per requirements
+    zip_code = Column(String(20), nullable=False) # Made mandatory per requirements
+    location = Column(String(255), nullable=True) # Deprecated in favor of zip_code
+    customer_type = Column(String(50), default='contractor')
     notes = Column(Text, nullable=True)
     
     # User association - nullable for backward compatibility

@@ -44,6 +44,7 @@ class Database:
                          full_name TEXT,
                          is_active INTEGER DEFAULT 1,
                          is_admin INTEGER DEFAULT 0,
+                         role TEXT DEFAULT 'user',
                          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                          last_login TIMESTAMP)''')
             
@@ -108,6 +109,7 @@ class Database:
                          quantity INTEGER,
                          final_price REAL,
                          user_id INTEGER,
+                         status TEXT DEFAULT 'pending_admin_approval',
                          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                          FOREIGN KEY(user_id) REFERENCES users(id))''')
             
@@ -117,6 +119,18 @@ class Database:
             except:
                 c.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
                 print("✓ Added is_admin column to users table")
+
+            # Migration: Add role column to existing users table if it doesn't exist
+            try:
+                c.execute("SELECT role FROM users LIMIT 1")
+            except:
+                c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+                print("✓ Added role column to users table")
+                
+                # Backfill role based on is_admin
+                c.execute("UPDATE users SET role = 'admin' WHERE is_admin = 1")
+                conn.commit()
+                print("✓ Backfilled role column based on is_admin status")
             
             # Migration: Add user_id column to existing quotes table if it doesn't exist
             try:
@@ -124,6 +138,60 @@ class Database:
             except:
                 c.execute("ALTER TABLE quotes ADD COLUMN user_id INTEGER REFERENCES users(id)")
                 print("✓ Added user_id column to quotes table")
+
+            # Migration: Add status column to existing quotes table if it doesn't exist
+            try:
+                c.execute("SELECT status FROM quotes LIMIT 1")
+            except:
+                c.execute("ALTER TABLE quotes ADD COLUMN status TEXT DEFAULT 'pending_admin_approval'")
+                print("✓ Added status column to quotes table")
+                
+                # Backfill status for existing quotes to 'approved' (assuming old quotes are valid)
+                c.execute("UPDATE quotes SET status = 'approved' WHERE status = 'pending_admin_approval'")
+                conn.commit()
+                print("✓ Backfilled status column for existing quotes")
+            
+            # Migration: Add business_name column to customers table
+            try:
+                c.execute("SELECT business_name FROM customers LIMIT 1")
+            except:
+                c.execute("ALTER TABLE customers ADD COLUMN business_name TEXT")
+                print("✓ Added business_name column to customers table")
+
+            # Migration: Add zip_code column to customers table
+            try:
+                c.execute("SELECT zip_code FROM customers LIMIT 1")
+            except:
+                c.execute("ALTER TABLE customers ADD COLUMN zip_code TEXT")
+                print("✓ Added zip_code column to customers table")
+                
+                # Migrate location to zip_code (naive migration)
+                c.execute("UPDATE customers SET zip_code = location WHERE location IS NOT NULL")
+                print("✓ Migrated location to zip_code")
+
+            # Migration: Add customer_type column to customers table
+            try:
+                c.execute("SELECT customer_type FROM customers LIMIT 1")
+            except:
+                c.execute("ALTER TABLE customers ADD COLUMN customer_type TEXT DEFAULT 'contractor'")
+                print("✓ Added customer_type column to customers table")
+            
+            # Migration: Ensure email is unique
+            try:
+                c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_email ON customers(email)")
+            except Exception as e:
+                print(f"Note: Could not create unique index on customers email: {e}")
+
+            # Create customer_interactions table
+            c.execute('''CREATE TABLE IF NOT EXISTS customer_interactions
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     customer_id TEXT NOT NULL,
+                     user_id INTEGER,
+                     status TEXT NOT NULL,
+                     notes TEXT,
+                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                     FOREIGN KEY (customer_id) REFERENCES customers(id),
+                     FOREIGN KEY (user_id) REFERENCES users(id))''')
             
             # Create index for quote user_id filtering
             c.execute('''CREATE INDEX IF NOT EXISTS idx_quotes_user_id ON quotes(user_id)''')
@@ -394,14 +462,14 @@ class Database:
             conn.close()
 
     def create_quote(self, customer_name: str, location: str, 
-                    product_specs: str, quantity: int, final_price: float, user_id: int = None) -> int:
+                    product_specs: str, quantity: int, final_price: float, user_id: int = None, status: str = 'pending_admin_approval') -> int:
         conn = self.get_connection()
         try:
             c = conn.cursor()
             c.execute('''INSERT INTO quotes
-                        (customer_name, location, product_specs, quantity, final_price, user_id)
-                        VALUES (?, ?, ?, ?, ?, ?)''',
-                     (customer_name, location, product_specs, quantity, final_price, user_id))
+                        (customer_name, location, product_specs, quantity, final_price, user_id, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                     (customer_name, location, product_specs, quantity, final_price, user_id, status))
             conn.commit()
             return c.lastrowid
         finally:
@@ -425,14 +493,70 @@ class Database:
         finally:
             conn.close()
 
+    def get_analytics_data(self, user_id: int = None, is_admin: bool = False):
+        """Get comprehensive quote data for analytics, joined with customer info"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            
+            query = '''
+                SELECT 
+                    q.id, 
+                    q.customer_name, 
+                    q.location, 
+                    q.product_specs, 
+                    q.quantity, 
+                    q.final_price, 
+                    q.created_at,
+                    c.zip_code,
+                    c.customer_type,
+                    c.business_name
+                FROM quotes q
+                LEFT JOIN customers c ON q.customer_name = c.business_name OR q.customer_name = c.full_name
+            '''
+            
+            params = []
+            
+            if not is_admin and user_id is not None:
+                query += " WHERE q.user_id = ? OR q.user_id IS NULL"
+                params.append(user_id)
+                
+            query += " ORDER BY q.created_at DESC"
+            
+            c.execute(query, params)
+            return [dict(row) for row in c.fetchall()]
+        finally:
+            conn.close()
+
     def is_user_admin(self, user_id: int) -> bool:
         """Check if a user has admin privileges"""
         conn = self.get_connection()
         try:
             c = conn.cursor()
-            c.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,))
+            # Check role first, fallback to is_admin flag
+            c.execute("SELECT role, is_admin FROM users WHERE id = ?", (user_id,))
             result = c.fetchone()
-            return bool(result['is_admin']) if result else False
+            if not result:
+                return False
+            
+            # If role column exists and is populated
+            if 'role' in result.keys() and result['role']:
+                return result['role'] in ('admin', 'super_admin')
+                
+            return bool(result['is_admin'])
+        finally:
+            conn.close()
+
+    def is_user_super_admin(self, user_id: int) -> bool:
+        """Check if a user is a super admin"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+            result = c.fetchone()
+            if not result or 'role' not in result.keys():
+                return False
+            return result['role'] == 'super_admin'
         finally:
             conn.close()
 
@@ -536,10 +660,54 @@ class Database:
         conn = self.get_connection()
         try:
             c = conn.cursor()
-            c.execute('''SELECT id, username, email, password_hash, full_name, is_active, is_admin, last_login
+            c.execute('''SELECT id, username, email, password_hash, full_name, is_active, is_admin, role, last_login
                         FROM users WHERE username = ? AND is_active = 1''', (username.lower(),))
             result = c.fetchone()
             return dict(result) if result else None
+        finally:
+            conn.close()
+
+    def get_all_users(self) -> list:
+        """Get all users for management"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute('''SELECT id, username, email, full_name, is_active, is_admin, role, last_login, created_at
+                        FROM users ORDER BY created_at DESC''')
+            return [dict(row) for row in c.fetchall()]
+        finally:
+            conn.close()
+
+    def update_user_role(self, user_id: int, new_role: str) -> bool:
+        """Update user role"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            
+            # Update role and sync is_admin flag for backward compatibility
+            is_admin_flag = 1 if new_role in ('admin', 'super_admin') else 0
+            
+            c.execute("UPDATE users SET role = ?, is_admin = ? WHERE id = ?", 
+                     (new_role, is_admin_flag, user_id))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error updating user role: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def delete_user(self, user_id: int) -> bool:
+        """Soft delete user"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error deleting user: {e}")
+            return False
         finally:
             conn.close()
 

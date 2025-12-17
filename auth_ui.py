@@ -293,7 +293,11 @@ def render_login_page(db: Database) -> bool:
                     st.session_state.email = user['email']
                     st.session_state.full_name = user['full_name']
                     st.session_state.remember_me = remember_me
-                    st.session_state.is_admin = bool(user.get('is_admin', 0))  # Load admin status
+                    
+                    # Load role and admin status
+                    role = user.get('role', 'user')
+                    st.session_state.role = role
+                    st.session_state.is_admin = role in ('admin', 'super_admin') or bool(user.get('is_admin', 0))
                     
                     st.success(f"✅ Welcome back, {user['full_name']}!")
                     st.toast(f"Logged in as {user['username']}", icon="✅")
@@ -415,12 +419,17 @@ def render_signup_page(db: Database) -> bool:
                     st.error(f"❌ {error}")
                     return False
                 
-                # Check admin code
+                # Check admin/super admin code
                 is_admin_signup = False
+                is_super_admin_signup = False
+                
                 if admin_code:
                     if admin_code == "admin123":  # Simple hardcoded check for now
                         is_admin_signup = True
                         st.toast("Admin privileges granted!", icon="👑")
+                    elif admin_code == "supersecret2025": # Super Admin Code
+                        is_super_admin_signup = True
+                        st.toast("Super Admin privileges granted!", icon="🚀")
                     else:
                         st.warning("⚠️ Invalid Admin Code - Account will be created as standard user")
                 
@@ -431,12 +440,21 @@ def render_signup_page(db: Database) -> bool:
                 result = db.register_user(username, email, password_hash, full_name)
                 
                 if result['success']:
-                    # If admin code was valid, update the user to be admin immediately
-                    if is_admin_signup:
+                    # If admin code was valid, update the user role immediately
+                    if is_super_admin_signup:
                         try:
                             conn = db.get_connection()
                             c = conn.cursor()
-                            c.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (result['user_id'],))
+                            c.execute("UPDATE users SET role = 'super_admin', is_admin = 1 WHERE id = ?", (result['user_id'],))
+                            conn.commit()
+                            conn.close()
+                        except Exception as e:
+                            print(f"Error promoting user to super admin: {e}")
+                    elif is_admin_signup:
+                        try:
+                            conn = db.get_connection()
+                            c = conn.cursor()
+                            c.execute("UPDATE users SET role = 'admin', is_admin = 1 WHERE id = ?", (result['user_id'],))
                             conn.commit()
                             conn.close()
                         except Exception as e:
@@ -456,7 +474,11 @@ def render_signup_page(db: Database) -> bool:
                         st.session_state.email = user['email']
                         st.session_state.full_name = user['full_name']
                         st.session_state.remember_me = True
-                        st.session_state.is_admin = bool(user.get('is_admin', 0))  # Load admin status
+                        
+                        # Load role and admin status
+                        role = user.get('role', 'user')
+                        st.session_state.role = role
+                        st.session_state.is_admin = role in ('admin', 'super_admin') or bool(user.get('is_admin', 0))
                         
                         st.success(f"✅ Welcome to PrimeLine, {full_name}!")
                         st.toast("Account created successfully!", icon="🎉")

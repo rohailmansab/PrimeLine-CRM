@@ -395,7 +395,9 @@ Important: Ensure optimal price is between low and high, and all prices are real
         fallback_response = {
             "selling_price": round(recommended_price, 2),
             "margin": round(markup_percentage, 1),
-            "confidence": 0.7
+            "confidence": 0.7,
+            "suggested_retail_price": round(base_cost * 2.0, 2),
+            "suggested_dealer_price": round(base_cost * 1.4, 2)
         }
         
         if not self.initialized or not self.model:
@@ -423,7 +425,9 @@ Return ONLY valid JSON:
 {{
   "selling_price": <float>,
   "margin": <percentage as float>,
-  "confidence": <float between 0 and 1>
+  "confidence": <float between 0 and 1>,
+  "suggested_retail_price": <float>,
+  "suggested_dealer_price": <float>
 }}
 
 Rules:
@@ -431,8 +435,10 @@ Rules:
 - Margin should typically be 20-50% for flooring
 - Confidence reflects market data quality
 - Consider demand when setting price
+- suggested_retail_price: Market rate for end consumers (usually higher)
+- suggested_dealer_price: Market rate for contractors/dealers (usually lower)
 
-Example: {{"selling_price": 5.67, "margin": 32.5, "confidence": 0.85}}
+Example: {{"selling_price": 5.67, "margin": 32.5, "confidence": 0.85, "suggested_retail_price": 6.50, "suggested_dealer_price": 5.20}}
 """
             
             response = self.model.generate_content(prompt)
@@ -443,12 +449,16 @@ Example: {{"selling_price": 5.67, "margin": 32.5, "confidence": 0.85}}
                     selling_price = float(result["selling_price"])
                     margin = float(result.get("margin", markup_percentage))
                     confidence = float(result.get("confidence", 0.8))
+                    retail = float(result.get("suggested_retail_price", base_cost * 2.0))
+                    dealer = float(result.get("suggested_dealer_price", base_cost * 1.4))
                     
                     if selling_price > base_cost and 0 <= confidence <= 1:
                         return {
                             "selling_price": round(selling_price, 2),
                             "margin": round(margin, 1),
-                            "confidence": round(confidence, 2)
+                            "confidence": round(confidence, 2),
+                            "suggested_retail_price": round(retail, 2),
+                            "suggested_dealer_price": round(dealer, 2)
                         }
                 except (ValueError, TypeError) as e:
                     print(f"Error parsing quote values: {str(e)}")

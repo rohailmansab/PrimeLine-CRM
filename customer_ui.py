@@ -5,7 +5,7 @@ from datetime import datetime
 
 from models.base import SessionLocal
 from repositories.customer_repository import CustomerRepository
-from schemas.customer import CustomerCreate, CustomerUpdate
+from schemas.customer import CustomerCreate, CustomerUpdate, CustomerInteractionCreate, InteractionStatus
 
 def get_repository():
     if 'db' not in st.session_state:
@@ -27,18 +27,24 @@ def add_customer_dialog():
         col1, col2 = st.columns(2)
         with col1:
             full_name = st.text_input("Full Name*")
+            business_name = st.text_input("Business Name")
             email = st.text_input("Email*")
         with col2:
-            phone = st.text_input("Phone")
-            location = st.text_input("Location")
+            phone = st.text_input("Phone*")
+            zip_code = st.text_input("Zip Code*")
+            customer_type = st.selectbox(
+                "Customer Type", 
+                options=["contractor", "architect", "installer", "diy"],
+                format_func=lambda x: x.title()
+            )
         
         notes = st.text_area("Notes")
         
         submitted = st.form_submit_button("Create Customer", type="primary")
         
         if submitted:
-            if not full_name or not email:
-                st.error("Name and Email are required.")
+            if not full_name or not email or not phone or not zip_code:
+                st.error("Name, Email, Phone, and Zip Code are required.")
                 return
             
             try:
@@ -48,10 +54,12 @@ def add_customer_dialog():
                     return
 
                 new_customer = CustomerCreate(
-                    full_name=full_name, 
+                    full_name=full_name,
+                    business_name=business_name,
                     email=email, 
                     phone=phone, 
-                    location=location,
+                    zip_code=zip_code,
+                    customer_type=customer_type,
                     notes=notes
                 )
                 # Associate customer with logged-in user
@@ -63,24 +71,39 @@ def add_customer_dialog():
                 st.error(f"Error creating customer: {str(e)}")
 
 @st.dialog("Edit Customer")
-def edit_customer_dialog(customer_id, current_name, current_email, current_phone, current_location, current_notes):
+def edit_customer_dialog(customer_id, current_name, current_business, current_email, current_phone, current_zip, current_type, current_notes):
     repo = get_repository()
     with st.form("edit_customer_form"):
         col1, col2 = st.columns(2)
         with col1:
             full_name = st.text_input("Full Name*", value=current_name)
+            business_name = st.text_input("Business Name", value=current_business if current_business else "")
             email = st.text_input("Email*", value=current_email)
         with col2:
-            phone = st.text_input("Phone", value=current_phone if current_phone else "")
-            location = st.text_input("Location", value=current_location if current_location else "")
+            phone = st.text_input("Phone*", value=current_phone if current_phone else "")
+            zip_code = st.text_input("Zip Code*", value=current_zip if current_zip else "")
+            
+            # Handle customer type selection
+            type_options = ["contractor", "architect", "installer", "diy"]
+            try:
+                type_index = type_options.index(current_type) if current_type in type_options else 0
+            except:
+                type_index = 0
+                
+            customer_type = st.selectbox(
+                "Customer Type",
+                options=type_options,
+                index=type_index,
+                format_func=lambda x: x.title()
+            )
             
         notes = st.text_area("Notes", value=current_notes if current_notes else "")
         
         submitted = st.form_submit_button("Update Customer", type="primary")
         
         if submitted:
-            if not full_name or not email:
-                st.error("Name and Email are required.")
+            if not full_name or not email or not phone or not zip_code:
+                st.error("Name, Email, Phone, and Zip Code are required.")
                 return
             
             try:
@@ -91,10 +114,12 @@ def edit_customer_dialog(customer_id, current_name, current_email, current_phone
                     return
 
                 update_data = CustomerUpdate(
-                    full_name=full_name, 
+                    full_name=full_name,
+                    business_name=business_name,
                     email=email, 
                     phone=phone, 
-                    location=location,
+                    zip_code=zip_code,
+                    customer_type=customer_type,
                     notes=notes
                 )
                 repo.update(customer_id, update_data)
@@ -102,6 +127,39 @@ def edit_customer_dialog(customer_id, current_name, current_email, current_phone
                 st.rerun()
             except Exception as e:
                 st.error(f"Error updating customer: {str(e)}")
+
+@st.dialog("Log Interaction")
+def log_interaction_dialog(customer_id, customer_name):
+    repo = get_repository()
+    st.write(f"Logging interaction for **{customer_name}**")
+    
+    with st.form("log_interaction_form"):
+        status = st.selectbox(
+            "Interaction Type",
+            options=[s.value for s in InteractionStatus],
+            format_func=lambda x: x.title()
+        )
+        
+        notes = st.text_area("Notes", placeholder="What was discussed?")
+        
+        submitted = st.form_submit_button("Save Log", type="primary")
+        
+        if submitted:
+            try:
+                interaction = CustomerInteractionCreate(
+                    customer_id=str(customer_id),
+                    status=status,
+                    notes=notes
+                )
+                # Get current user ID
+                user_id = st.session_state.get('user_id')
+                
+                repo.add_interaction(interaction, user_id)
+                show_toast("Interaction logged", "success")
+                time.sleep(0.5)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error logging interaction: {str(e)}")
 
 def render_customer_page():
     st.title("👥 Customer Management")
@@ -191,45 +249,90 @@ def render_customer_page():
         # but let's stick to a clean Streamlit layout with columns for actions.
         
         # Header
-        cols = st.columns([2, 2, 1.5, 1.5, 2, 1, 1])
-        headers = ["Name", "Email", "Phone", "Location", "Notes", "Status", "Actions"]
+        cols = st.columns([2, 2, 1.5, 1.5, 1.5, 2, 1, 1])
+        headers = ["Name/Business", "Email", "Phone", "Zip", "Type", "Notes", "Status", "Actions"]
         for col, header in zip(cols, headers):
             col.markdown(f"**{header}**")
         
         st.markdown("---")
         
         for c in customers:
-            cols = st.columns([2, 2, 1.5, 1.5, 2, 1, 1])
+            cols = st.columns([2, 2, 1.5, 1.5, 1.5, 2, 1, 1])
             
-            # Name & Avatar
+            # Name & Business
             with cols[0]:
                 st.markdown(f"**{c.full_name}**")
+                if c.business_name:
+                    st.caption(f"🏢 {c.business_name}")
             
             cols[1].write(c.email)
             cols[2].write(c.phone or "-")
-            cols[3].write(c.location or "-")
+            cols[3].write(c.zip_code or "-")
+            cols[4].write(c.customer_type.title() if c.customer_type else "-")
             
             # Notes with truncation
             notes_display = c.notes if c.notes else "-"
             if len(notes_display) > 30:
-                cols[4].write(notes_display[:30] + "...", help=notes_display)
+                cols[5].write(notes_display[:30] + "...", help=notes_display)
             else:
-                cols[4].write(notes_display)
+                cols[5].write(notes_display)
             
             status_color = "red" if c.is_deleted else "green"
-            cols[5].markdown(f":{status_color}[{'Deleted' if c.is_deleted else 'Active'}]")
+            cols[6].markdown(f":{status_color}[{'Deleted' if c.is_deleted else 'Active'}]")
             
-            with cols[6]:
+            with cols[7]:
                 if not c.is_deleted:
-                    c1, c2 = st.columns(2)
-                    if c1.button("✏️", key=f"edit_{c.id}", help="Edit"):
-                        edit_customer_dialog(c.id, c.full_name, c.email, c.phone, c.location, c.notes)
+                    # Action buttons container
+                    action_cols = st.columns([1, 1, 1])
                     
-                    if c2.button("🗑️", key=f"del_{c.id}", help="Delete", type="secondary"):
-                        if repo.delete(c.id):
-                            show_toast("Customer deleted", "success")
-                            time.sleep(0.5)
-                            st.rerun()
+                    # Log Interaction (All users)
+                    if action_cols[0].button("💬", key=f"log_{c.id}", help="Log Interaction", type="tertiary"):
+                        log_interaction_dialog(c.id, c.full_name)
+                        
+                    # Edit Customer (All users)
+                    if action_cols[1].button("✏️", key=f"edit_{c.id}", help="Edit", type="tertiary"):
+                        edit_customer_dialog(
+                            c.id, 
+                            c.full_name, 
+                            c.business_name,
+                            c.email, 
+                            c.phone, 
+                            c.zip_code,
+                            c.customer_type,
+                            c.notes
+                        )
+                    
+                    # Delete Customer (Admin Only)
+                    if is_admin:
+                        if action_cols[2].button("🗑️", key=f"del_{c.id}", help="Delete", type="tertiary"):
+                            if repo.delete(c.id):
+                                show_toast("Customer deleted", "success")
+                                time.sleep(0.5)
+                                st.rerun()
+                    
+                    # Admin Assignment UI
+                    if is_admin:
+                        with st.popover("👤 Assign"):
+                            # Fetch users for assignment
+                            users = db_instance.get_all_users()
+                            user_options = {u['username']: u['id'] for u in users if u['is_active']}
+                            
+                            # Determine current assignee
+                            current_assignee = next((u['username'] for u in users if u['id'] == c.user_id), "Unassigned")
+                            st.caption(f"Current: {current_assignee}")
+                            
+                            selected_user = st.selectbox("Assign to:", ["Unassigned"] + list(user_options.keys()), key=f"assign_sel_{c.id}")
+                            
+                            if st.button("Update Assignment", key=f"assign_btn_{c.id}"):
+                                if selected_user == "Unassigned":
+                                    repo.remove_assignment(c.id)
+                                    st.success("Unassigned")
+                                else:
+                                    repo.assign_to_user(c.id, user_options[selected_user])
+                                    st.success(f"Assigned to {selected_user}")
+                                time.sleep(0.5)
+                                st.rerun()
+
                 else:
                     if st.button("♻️ Restore", key=f"res_{c.id}"):
                         if repo.restore(c.id):
@@ -334,6 +437,22 @@ def render_customer_history_page():
             
         st.info(f"**Buying Power Status:** {power} - {desc}")
         
+        # Interaction History
+        st.subheader("💬 Interaction History")
+        interactions = repo.get_interactions(str(selected_customer.id))
+        
+        if interactions:
+            for interaction in interactions:
+                with st.expander(f"{interaction.status.title()} - {interaction.created_at.strftime('%Y-%m-%d %H:%M')}"):
+                    st.write(interaction.notes)
+                    # If we had user names, we'd show who logged it. For now, just the ID if available or generic.
+                    if interaction.user_id:
+                        st.caption(f"Logged by User ID: {interaction.user_id}")
+        else:
+            st.caption("No interactions logged yet.")
+
+        st.divider()
+
         st.subheader("📜 Purchase History")
         
         cursor.execute(

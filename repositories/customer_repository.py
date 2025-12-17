@@ -5,7 +5,8 @@ from typing import List, Optional, Tuple
 from uuid import UUID
 
 from models.customer import Customer
-from schemas.customer import CustomerCreate, CustomerUpdate
+from models.interaction import CustomerInteraction
+from schemas.customer import CustomerCreate, CustomerUpdate, CustomerInteractionCreate
 
 class CustomerRepository:
     def __init__(self, db: Session):
@@ -20,9 +21,12 @@ class CustomerRepository:
     def create(self, customer: CustomerCreate, user_id: str = None) -> Customer:
         db_customer = Customer(
             full_name=customer.full_name,
+            business_name=customer.business_name,
             email=customer.email,
             phone=customer.phone,
+            zip_code=customer.zip_code,
             location=customer.location,
+            customer_type=customer.customer_type,
             notes=customer.notes,
             user_id=user_id  # Associate with creating user
         )
@@ -66,6 +70,26 @@ class CustomerRepository:
         self.db.commit()
         return True
 
+    def assign_to_user(self, customer_id: UUID, user_id: int) -> bool:
+        """Assign customer to a specific user"""
+        db_customer = self.get_by_id(customer_id)
+        if not db_customer:
+            return False
+        
+        db_customer.user_id = user_id
+        self.db.commit()
+        return True
+
+    def remove_assignment(self, customer_id: UUID) -> bool:
+        """Remove user assignment from customer (make shared)"""
+        db_customer = self.get_by_id(customer_id)
+        if not db_customer:
+            return False
+        
+        db_customer.user_id = None
+        self.db.commit()
+        return True
+
     def list_customers(
         self, 
         skip: int = 0, 
@@ -96,8 +120,10 @@ class CustomerRepository:
             query = query.filter(
                 or_(
                     Customer.full_name.ilike(search),
+                    Customer.business_name.ilike(search),
                     Customer.email.ilike(search),
                     Customer.phone.ilike(search),
+                    Customer.zip_code.ilike(search),
                     Customer.location.ilike(search),
                     Customer.notes.ilike(search)
                 )
@@ -107,3 +133,21 @@ class CustomerRepository:
         customers = query.order_by(desc(Customer.created_at)).offset(skip).limit(limit).all()
         
         return customers, total
+
+    def add_interaction(self, interaction: CustomerInteractionCreate, user_id: int) -> CustomerInteraction:
+        db_interaction = CustomerInteraction(
+            customer_id=interaction.customer_id,
+            user_id=user_id,
+            status=interaction.status,
+            notes=interaction.notes
+        )
+        self.db.add(db_interaction)
+        self.db.commit()
+        self.db.refresh(db_interaction)
+        return db_interaction
+
+    def get_interactions(self, customer_id: str) -> List[CustomerInteraction]:
+        return self.db.query(CustomerInteraction)\
+            .filter(CustomerInteraction.customer_id == customer_id)\
+            .order_by(desc(CustomerInteraction.created_at))\
+            .all()

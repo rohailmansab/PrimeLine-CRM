@@ -373,14 +373,17 @@ def render_sidebar():
             st.info("👑 Admin Access")
         
         # Conditional navigation based on admin status
-        if is_admin:
-            # Admin users see all pages including Supplier Management
+        # Conditional navigation based on admin status
+        role = st.session_state.get('role', 'user')
+        
+        if role in ['super_admin', 'admin']:
+             # Admins see Admin Dashboard + other tools
             selected = st.radio(
                 "Go to",
-                ["📧 Supplier Management", "💰 Quote Generator", "📊 Analytics", "👥 Customers", "📜 Customer History"]
+                ["🛡️ Admin Dashboard", "📧 Supplier Management", "💰 Quote Generator", "📊 Analytics", "👥 Customers", "📜 Customer History"]
             )
         else:
-            # Regular users don't see Supplier Management
+            # Regular users don't see Admin Dashboard or Supplier Management
             selected = st.radio(
                 "Go to",
                 ["💰 Quote Generator", "👥 Customers", "📜 Customer History", "📊 Analytics"]
@@ -604,13 +607,13 @@ def render_quote_page():
             location = st.text_input("Location", value=default_location)
             quantity = st.number_input("Square Feet", 100, 10000, 1000)
             
-            submitted = st.form_submit_button("Generate Quote", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("Submit for Approval", type="primary", use_container_width=True)
     
     if submitted:
         if not customer_name or not customer_name.strip():
             st.error("⚠️ Customer name is required to generate a quote")
         else:
-            with st.spinner("Generating intelligent quote..."):
+            with st.spinner("Processing quote request..."):
                 try:
                     matching_product = next(
                         (p for p in products if p['name'] == product and p['width'] == width),
@@ -673,17 +676,22 @@ def render_quote_page():
                     
                     selling_price = quote_data["selling_price"]
                     margin = quote_data["margin"]
+                    suggested_retail = quote_data.get("suggested_retail_price")
+                    suggested_dealer = quote_data.get("suggested_dealer_price")
+                    
                     total = round(selling_price * quantity, 2)
                     
-                    # Create quote with user_id
+                    # Create quote with user_id and pending status
                     user_id = st.session_state.get('user_id')
                     db.create_quote(
                         customer_name, location,
                         json.dumps({"product": product, "width": width}),
-                        quantity, total, user_id=user_id
+                        quantity, total, user_id=user_id,
+                        status='pending_admin_approval'
                     )
                     
-                    st.success("✓ Quote Generated Successfully!")
+                    st.success("✓ Quote Submitted for Approval!")
+                    st.info("Your quote has been sent to the admin for review. You will be notified once it is approved.")
                     st.write("---")
                     
                     col1, col2, col3 = st.columns(3)
@@ -712,6 +720,18 @@ def render_quote_page():
                             st.write(f"**Applied Discount:** {discount_pct}% = {format_currency(discounted_price)}")
                         st.write(f"**Selling Price (per sqft):** {format_currency(selling_price)}")
                         st.write(f"**Market Analysis:** {market_data.get('demand_indicator', 'N/A')}")
+                        
+                        # Admin-only visibility for AI suggested prices
+                        if st.session_state.get('role') in ['admin', 'super_admin']:
+                            st.divider()
+                            st.markdown("### 🔒 Admin Insights (AI Suggested)")
+                            ac1, ac2 = st.columns(2)
+                            with ac1:
+                                if suggested_retail:
+                                    st.metric("Suggested Retail Price", format_currency(suggested_retail), help="Market rate for end consumers")
+                            with ac2:
+                                if suggested_dealer:
+                                    st.metric("Suggested Dealer Price", format_currency(suggested_dealer), help="Market rate for contractors/dealers")
                         
                         if matching_product:
                             st.divider()
@@ -763,46 +783,107 @@ def render_analytics_page():
             st.caption("👤 Personal view: Showing your quotes only")
         
         try:
-            # Filter quotes by user
-            quotes = db.get_latest_quotes(100, user_id=user_id, is_admin=is_admin)
-            if quotes and len(quotes) > 0:
-                quotes_df = pd.DataFrame([
-                    {
-                        'id': q['id'],
-                        'customer_name': q['customer_name'],
-                        'location': q['location'],
-                        'product_specs': q['product_specs'],
-                        'quantity': q['quantity'],
-                        'final_price': q['final_price'],
-                        'created_at': q['created_at']
-                    }
-                    for q in quotes
-                ])
+            # Fetch comprehensive analytics data
+            analytics_data = db.get_analytics_data(user_id=user_id, is_admin=is_admin)
+            
+            if analytics_data:
+                # Process data into DataFrame
+                df = pd.DataFrame(analytics_data)
                 
-                st.metric("Total Quotes", len(quotes))
+                # Extract wood type and width from product_specs JSON
+                def extract_specs(specs_str):
+                    try:
+                        specs = json.loads(specs_str)
+                        return specs.get('product', 'Unknown'), specs.get('width', 'Unknown')
+                    except:
+                        return 'Unknown', 'Unknown'
+
+                df['wood_type'], df['width'] = zip(*df['product_specs'].map(extract_specs))
                 
-                if not quotes_df.empty and 'final_price' in quotes_df.columns:
-                    avg_value = quotes_df['final_price'].mean()
-                    st.metric("Average Quote Value", format_currency(avg_value))
-                    
-                    if len(quotes_df) > 1:
-                        try:
-                            quotes_df['created_at'] = pd.to_datetime(quotes_df['created_at'])
-                            st.write("Quote History")
-                            chart_data = quotes_df.set_index('created_at')['final_price']
-                            st.line_chart(chart_data, width="stretch")
-                        except Exception as e:
-                            st.warning(f"Could not display chart: {str(e)}")
-                    
-                    st.write("Recent Quotes")
-                    display_quotes = quotes_df[['customer_name', 'location', 'quantity', 'final_price']].head(10).copy()
-                    display_quotes.columns = ['Customer', 'Location', 'Sq Ft', 'Total']
-                    display_quotes['Total'] = display_quotes['Total'].apply(format_currency)
-                    st.dataframe(display_quotes, hide_index=True, width="stretch")
+                # Ensure zip_code is available (fallback to location if missing)
+                df['zip_code'] = df['zip_code'].fillna(df['location'])
+                df['customer_type'] = df['customer_type'].fillna('Unknown').str.title()
+                
+                # --- Sorting Controls ---
+                st.markdown("### 🛠️ Filter & Sort")
+                sort_col, order_col = st.columns([2, 1])
+                with sort_col:
+                    sort_by = st.selectbox(
+                        "Sort Quotes By",
+                        ["Date (Newest First)", "Date (Oldest First)", "Customer Name", "Wood Type", "Zip Code", "Price (High to Low)"]
+                    )
+                
+                # Apply sorting
+                if sort_by == "Date (Newest First)":
+                    df = df.sort_values('created_at', ascending=False)
+                elif sort_by == "Date (Oldest First)":
+                    df = df.sort_values('created_at', ascending=True)
+                elif sort_by == "Customer Name":
+                    df = df.sort_values('customer_name')
+                elif sort_by == "Wood Type":
+                    df = df.sort_values('wood_type')
+                elif sort_by == "Zip Code":
+                    df = df.sort_values('zip_code')
+                elif sort_by == "Price (High to Low)":
+                    df = df.sort_values('final_price', ascending=False)
+                
+                # --- Display Key Metrics ---
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total Quotes", len(df))
+                m2.metric("Avg Quote Value", format_currency(df['final_price'].mean()))
+                m3.metric("Total Volume", f"{df['quantity'].sum():,} sqft")
+                
+                # --- Quote History Chart ---
+                if len(df) > 1:
+                    st.markdown("### 📈 Quote History")
+                    df['created_at'] = pd.to_datetime(df['created_at'])
+                    chart_data = df.set_index('created_at')['final_price']
+                    st.line_chart(chart_data, width="stretch")
+                
+                # --- New Visualizations ---
+                st.divider()
+                st.subheader("📍 Pricing Insights")
+                
+                tab1, tab2 = st.tabs(["🗺️ Zip Code Analysis", "👥 Dealer vs Retail"])
+                
+                with tab1:
+                    st.markdown("**Average Price per SqFt by Zip Code**")
+                    if 'zip_code' in df.columns and not df['zip_code'].isnull().all():
+                        # Calculate price per sqft for each quote first
+                        df['price_per_sqft'] = df['final_price'] / df['quantity']
+                        zip_stats = df.groupby('zip_code')['price_per_sqft'].mean().sort_values(ascending=False)
+                        st.bar_chart(zip_stats)
+                    else:
+                        st.info("Insufficient zip code data for analysis.")
+                        
+                with tab2:
+                    st.markdown("**Pricing Strategy: Dealer vs Retail**")
+                    if 'customer_type' in df.columns:
+                        # Calculate price per sqft
+                        if 'price_per_sqft' not in df.columns:
+                            df['price_per_sqft'] = df['final_price'] / df['quantity']
+                        
+                        type_stats = df.groupby('customer_type')['price_per_sqft'].mean()
+                        st.bar_chart(type_stats, color="#ffaa00")
+                        
+                        # Show data table
+                        st.dataframe(type_stats.to_frame(name="Avg Price/SqFt").style.format("${:.2f}"), use_container_width=True)
+                    else:
+                        st.info("Insufficient customer type data.")
+
+                # --- Recent Quotes Table ---
+                st.divider()
+                st.subheader("📋 Recent Quotes")
+                display_cols = ['customer_name', 'wood_type', 'zip_code', 'quantity', 'final_price', 'created_at']
+                display_df = df[display_cols].copy()
+                display_df.columns = ['Customer', 'Product', 'Zip/Location', 'Sq Ft', 'Total Price', 'Date']
+                display_df['Total Price'] = display_df['Total Price'].apply(format_currency)
+                st.dataframe(display_df, hide_index=True, use_container_width=True)
+                
             else:
                 st.info("ℹ️ No quotes generated yet. Create quotes to see statistics.")
         except Exception as e:
-            st.error(f"Error loading quote statistics: {str(e)}")
+            st.error(f"Error loading analytics: {str(e)}")
     
     with col2:
         st.subheader("Current Pricing Overview")
@@ -920,7 +1001,19 @@ def render_analytics_page():
 def main():
     selected = render_sidebar()
     
-    if selected == "📧 Supplier Management":
+    if selected == "🛡️ Admin Dashboard":
+        # Admin Dashboard - User Management & Quote Approvals
+        if st.session_state.get('role') in ['admin', 'super_admin']:
+            from admin_ui import render_admin_dashboard
+            # Pass email_handler if available, else None
+            eh = email_handler if 'email_handler' in globals() else None
+            render_admin_dashboard(db, eh)
+        else:
+            st.error("⛔ Access Denied: Admin privileges required.")
+    elif selected == "👥 User Management": # Backward compatibility or removal
+        # This block can be removed if "User Management" is no longer an option
+        pass
+    elif selected == "📧 Supplier Management":
         # Protect supplier management - admin only
         if require_admin():
             from supplier_ui import render_supplier_page

@@ -33,8 +33,8 @@ def render_user_management_tab(db: Database):
     st.subheader("👥 User Management")
     
     # Security check - double check just in case
-    if st.session_state.get('role') != 'super_admin':
-        st.warning("⚠️ User Management is restricted to Super Admins.")
+    if st.session_state.get('role') not in ['admin', 'super_admin']:
+        st.warning("⚠️ User Management is restricted to Admins and Super Admins.")
         return
 
     # Fetch all users
@@ -63,6 +63,8 @@ def render_user_management_tab(db: Database):
     # User List with Actions
     st.subheader("User Directory")
     
+    current_user_role = st.session_state.get('role')
+    
     for user in users:
         with st.expander(f"{user['full_name']} (@{user['username']}) - {user['role'].upper()}", expanded=False):
             col1, col2 = st.columns([2, 1])
@@ -76,7 +78,7 @@ def render_user_management_tab(db: Database):
             
             with col2:
                 # Actions
-                current_role = user['role']
+                target_user_role = user['role']
                 user_id = user['id']
                 
                 # Prevent modifying self
@@ -84,10 +86,15 @@ def render_user_management_tab(db: Database):
                     st.info("You cannot modify your own account here.")
                     continue
                 
-                # Prevent modifying other Super Admins (optional, but good practice)
-                if current_role == 'super_admin':
-                    st.warning("Cannot modify other Super Admins.")
+                # Prevent Admin from modifying Super Admin
+                if current_user_role == 'admin' and target_user_role == 'super_admin':
+                    st.warning("⛔ Cannot modify Super Admins.")
                     continue
+                
+                # Prevent modifying other Super Admins (optional, but good practice)
+                if target_user_role == 'super_admin' and current_user_role != 'super_admin':
+                     st.warning("Cannot modify Super Admins.")
+                     continue
 
                 st.write("### Actions")
                 
@@ -95,7 +102,7 @@ def render_user_management_tab(db: Database):
                 new_role = st.selectbox(
                     "Change Role",
                     options=['user', 'admin', 'super_admin'],
-                    index=['user', 'admin', 'super_admin'].index(current_role) if current_role in ['user', 'admin', 'super_admin'] else 0,
+                    index=['user', 'admin', 'super_admin'].index(target_user_role) if target_user_role in ['user', 'admin', 'super_admin'] else 0,
                     key=f"role_select_{user_id}"
                 )
                 

@@ -505,6 +505,20 @@ class Database:
         finally:
             conn.close()
 
+    def update_quote(self, quote_id, total_price):
+        """Update quote details (currently only total_price supported for edit)"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute("UPDATE quotes SET total_price = ? WHERE id = ?", (total_price, quote_id))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error updating quote: {e}")
+            return False
+        finally:
+            conn.close()
+
     def get_latest_quotes(self, limit: int = 50, user_id: int = None, is_admin: bool = False):
         """Get latest quotes with user filtering. Admins see all, regular users see only their quotes."""
         conn = self.get_connection()

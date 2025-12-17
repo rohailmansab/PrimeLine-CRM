@@ -607,6 +607,11 @@ def render_quote_page():
             location = st.text_input("Location", value=default_location)
             quantity = st.number_input("Square Feet", 100, 10000, 1000)
             
+            use_ai_reference = True
+            is_admin = st.session_state.get('role') in ['admin', 'super_admin']
+            if is_admin:
+                use_ai_reference = st.checkbox("Use AI Suggested Price as Reference Only", value=True, help="If checked, quote will use Standard Price (Base + 30%). AI price will be shown for info only.")
+            
             submitted = st.form_submit_button("Submit for Approval", type="primary", use_container_width=True)
     
     if submitted:
@@ -680,8 +685,22 @@ def render_quote_page():
                         }
                         print(f"Using fallback quote calculation: {quote_data}")
                     
-                    selling_price = quote_data["selling_price"]
-                    margin = quote_data["margin"]
+                    # Security: Sanitize AI data for non-admins immediately
+                    if not is_admin:
+                        quote_data.pop('suggested_retail_price', None)
+                        quote_data.pop('suggested_dealer_price', None)
+                    
+                    # Pricing Logic: Determine final selling price
+                    ai_selling_price = quote_data["selling_price"]
+                    standard_selling_price = base_price * 1.3
+                    
+                    if is_admin and use_ai_reference:
+                        selling_price = standard_selling_price
+                        margin = 30.0
+                    else:
+                        selling_price = ai_selling_price
+                        margin = quote_data["margin"]
+                        
                     suggested_retail = quote_data.get("suggested_retail_price")
                     suggested_dealer = quote_data.get("suggested_dealer_price")
                     
@@ -736,11 +755,6 @@ def render_quote_page():
                             st.write(f"**Selling Price (per sqft):** {format_currency(selling_price)}")
                             st.write(f"**Market Analysis:** {market_data.get('demand_indicator', 'N/A')}")
                             
-                            # Backend Enforcement: Sanitize AI prices for non-admins (Redundant here as block is admin-only, but good practice)
-                            if not is_admin:
-                                suggested_retail = None
-                                suggested_dealer = None
-                            
                             # Admin-only visibility for AI suggested prices
                             st.divider()
                             st.markdown("### 🤖 AI Market Pricing (Zip-Code Based)")
@@ -785,7 +799,19 @@ def render_quote_page():
                                     if volume_discounts:
                                         st.info(f"📦 **Volume Discounts Available:** {volume_discounts}")
                     else:
-                        st.info("Quote submitted for admin review")
+                        # Regular User View - STRICTLY LIMITED
+                        st.info("ℹ️ Quote submitted for admin review")
+                        
+                        uc1, uc2, uc3 = st.columns(3)
+                        with uc1:
+                            if suggested_retail:
+                                st.metric("Suggested Retail Price", format_currency(suggested_retail), help="AI-Suggested Market Price")
+                            else:
+                                st.metric("Suggested Retail Price", "Pending")
+                        with uc2:
+                            st.metric("Quantity", f"{quantity} sqft")
+                        with uc3:
+                            st.metric("Status", "Pending Admin Approval")
                         
                 except Exception as e:
                     st.error(f"Error generating quote: {str(e)}")

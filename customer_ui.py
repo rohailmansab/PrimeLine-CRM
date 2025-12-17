@@ -185,7 +185,7 @@ def render_customer_page():
     with col3:
         # Admin filter toggle
         if is_admin:
-            show_all = st.checkbox("All Customers", value=False, help="Show all customers (admin only)")
+            show_all = st.checkbox("All Customers", value=True, help="Show all customers (admin only)")
         else:
             show_all = False
     

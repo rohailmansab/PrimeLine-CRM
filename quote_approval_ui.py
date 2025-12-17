@@ -51,13 +51,33 @@ def render_approval_dashboard(db, email_handler):
                 
             st.divider()
             
-            b1, b2, b3 = st.columns([1, 1, 4])
+            b1, b2, b3 = st.columns([1, 1, 1])
             
             if b1.button("✅ Approve", key=f"approve_{quote['id']}", type="primary"):
                 _approve_quote(db, email_handler, quote)
                 
             if b2.button("❌ Reject", key=f"reject_{quote['id']}", type="secondary"):
                 _reject_quote(db, quote['id'])
+                
+            if b3.button("✏️ Edit", key=f"edit_{quote['id']}"):
+                edit_quote_dialog(db, quote)
+
+@st.dialog("Edit Quote")
+def edit_quote_dialog(db, quote):
+    st.write(f"Editing Quote #{quote['id']} for {quote['customer_name']}")
+    
+    with st.form("edit_quote_form"):
+        new_price = st.number_input("Total Price ($)", value=float(quote['final_price']), step=0.01)
+        
+        # We could add more fields here if needed, e.g. notes if we add a column
+        
+        if st.form_submit_button("Save Changes", type="primary"):
+            if db.update_quote(quote['id'], new_price):
+                st.success("Quote updated successfully!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Failed to update quote.")
 
 def _approve_quote(db, email_handler, quote):
     try:

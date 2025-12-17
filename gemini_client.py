@@ -332,6 +332,201 @@ Specifications: {json.dumps(product_specs)}
 Provide market analysis with competitive pricing recommendations.
 
 Return ONLY valid JSON with this exact structure:
+      "promotion": "Promotion Name",
+      "volume_discounts": "500-999 sqft: 5% off, 1000+ sqft: 10% off"
+    }}
+  ],
+  "notes": "any additional information"
+}}
+
+Example for "Red Oak 5\" now costs $3.95 with a discount of 12% for 20 days above 550 sq. feet":
+{{
+  "products": [
+    {{
+      "name": "Red Oak",
+      "width": "5\\"",
+      "price_per_sqft": 3.95,
+      "discount_percentage": 12,
+      "min_qty_discount": 550,
+      "promotion": "20-day promotion",
+      "volume_discounts": null
+    }}
+  ],
+  "notes": "12% discount applies for purchases over 550 sq. feet for 20 days"
+}}
+
+IMPORTANT RULES:
+- Extract ALL discount/promotion info mentioned in the email
+- Return ALL products found (list can have 1 or more items)
+- Discount percentage as number (not string with %)
+- Min quantity as number in sqft
+- Normalize product names to title case
+- Only include promotion/volume/min_qty fields if mentioned in the email (otherwise null)
+"""
+            
+            response = self.model.generate_content(prompt)
+            result = self._parse_json_response(response.text)
+            
+            if result and "products" in result and isinstance(result["products"], list):
+                validated_products = []
+                
+                for product in result["products"]:
+                    if not isinstance(product, dict):
+                        continue
+                        
+                    name = product.get("name", "").strip()
+                    price = product.get("price_per_sqft")
+                    width = product.get("width")
+                    
+                    if name and price:
+                        try:
+                            price_float = float(price)
+                            if 0.01 <= price_float <= 1000.0:
+                                validated_product = {
+                                    "name": name,
+                                    "price_per_sqft": price_float
+                                }
+                                
+                                if width:
+                                    width_str = str(width).strip()
+                                    if width_str and not width_str.endswith('"'):
+                                        width_str = f'{width_str}"'
+                                    validated_product["width"] = width_str
+                                else:
+                                    validated_product["width"] = None
+                                
+                                # Preserve promotion and discount fields if present
+                                if "discount_percentage" in product and product["discount_percentage"] is not None:
+                                    try:
+                                        validated_product["discount_percentage"] = float(product["discount_percentage"])
+                                    except (ValueError, TypeError):
+                                        pass
+                                
+                                if "min_qty_discount" in product and product["min_qty_discount"] is not None:
+                                    try:
+                                        validated_product["min_qty_discount"] = int(product["min_qty_discount"])
+                                    except (ValueError, TypeError):
+                                        pass
+                                
+                                if "promotion" in product and product["promotion"]:
+                                    validated_product["promotion"] = str(product["promotion"]).strip()
+                                
+                                if "volume_discounts" in product and product["volume_discounts"]:
+                                    validated_product["volume_discounts"] = str(product["volume_discounts"]).strip()
+                                
+                                validated_products.append(validated_product)
+                        except (ValueError, TypeError):
+                            continue
+                
+                if validated_products:
+                    return {
+                        "products": validated_products,
+                        "notes": result.get("notes", "")
+                    }
+            
+            return self._fallback_email_parse(email_content)
+            
+        except Exception as e:
+            print(f"Email parsing error: {str(e)}, using fallback")
+            return self._fallback_email_parse(email_content)
+    
+    def _fallback_email_parse(self, email_content: str) -> Optional[Dict[str, Any]]:
+        products = []
+        clean_content = re.sub(r'<[^>]+>', '', email_content)
+        
+        patterns = [
+            r'(?:updated?\s+)?(?:the\s+)?price\s+(?:of\s+)?(\d+)\s*(?:inch|in|"|\'\'|")\s+(?:width\s+)?(?:of\s+)?([A-Za-z\s]+?)\s+(?:to|is|now|:)?\s*\$?(\d+\.?\d*)',
+            r'([A-Za-z\s]+?)\s+(\d+)\s*(?:inch|in|"|\'\'|")\s+(?:is\s+)?(?:now\s+)?\$?(\d+\.?\d*)\s*(?:/sqft|per\s+sq\.?\s*ft\.?)?',
+            r'(\d+)\s*(?:inch|in|"|\'\'|")\s+([A-Za-z\s]+?)\s+(?:is\s+)?(?:now\s+)?\$?(\d+\.?\d*)\s*(?:/sqft|per\s+sq\.?\s*ft\.?)?',
+            r'([A-Za-z\s]+?)\s*[:|-]\s*\$?(\d+\.?\d*)\s*(?:/sqft|per\s+sq\.?\s*ft\.?)?',
+        ]
+        
+        for pattern in patterns:
+            matches = re.finditer(pattern, clean_content, re.IGNORECASE)
+            for match in matches:
+                try:
+                    groups = match.groups()
+                    
+                    if len(groups) == 3:
+                        if groups[0].isdigit():
+                            width = f'{groups[0]}"'
+                            name = groups[1].strip()
+                            price = float(groups[2])
+                        elif groups[1].isdigit():
+                            name = groups[0].strip()
+                            width = f'{groups[1]}"'
+                            price = float(groups[2])
+                        else:
+                            name = groups[0].strip()
+                            price = float(groups[1])
+                            width = None
+                    elif len(groups) == 2:
+                        name = groups[0].strip()
+                        price = float(groups[1])
+                        width = None
+                    else:
+                        continue
+                    
+                    name = ' '.join(name.split())
+                    name = name.title()
+                    
+                    wood_types = ['oak', 'maple', 'walnut', 'bamboo', 'cork', 'cherry', 'hickory', 'ash']
+                    if any(wood in name.lower() for wood in wood_types):
+                        if len(name) > 2 and 0.01 <= price <= 1000.0:
+                            product = {
+                                "name": name,
+                                "price_per_sqft": price,
+                                "width": width
+                            }
+                            
+                            if product not in products:
+                                products.append(product)
+                except (ValueError, IndexError, AttributeError) as e:
+                    continue
+        
+        if products:
+            return {
+                "products": products,
+                "notes": "Parsed using regex fallback"
+            }
+        
+        return None
+    
+    def generate_market_analysis(self, location: str, product_specs: Dict[str, Any]) -> Dict[str, Any]:
+        base_price = product_specs.get("cost", product_specs.get("base_price", 4.0))
+        
+        fallback_response = {
+            "recommended_price_range": {
+                "low": round(base_price * 1.2, 2),
+                "high": round(base_price * 1.6, 2),
+                "optimal": round(base_price * 1.35, 2)
+            },
+            "market_factors": ["Standard market conditions"],
+            "competitor_analysis": {
+                "average_market_price": round(base_price * 1.4, 2),
+                "price_positioning": "mid-range"
+            },
+            "seasonal_adjustment": 0,
+            "demand_indicator": "medium"
+        }
+        
+        if not self.initialized:
+            return fallback_response
+        
+        try:
+            product_name = product_specs.get("name", "Unknown Product")
+            
+            prompt = f"""
+Analyze the flooring market for pricing strategy.
+
+Location: {location}
+Product: {product_name}
+Base Cost: ${base_price:.2f} per sqft
+Specifications: {json.dumps(product_specs)}
+
+Provide market analysis with competitive pricing recommendations.
+
+Return ONLY valid JSON with this exact structure:
 {{
   "recommended_price_range": {{
     "low": <float>,
@@ -381,8 +576,8 @@ Important: Ensure optimal price is between low and high, and all prices are real
         except Exception as e:
             print(f"Market analysis error: {str(e)}, using fallback")
             return fallback_response
-    
-    def calculate_quote(self, base_cost: float, market_data: Any) -> Dict[str, float]:
+
+    def calculate_quote(self, base_cost: float, market_data: Any, product_name: str = "Unknown", width: str = "Unknown", location: str = "Unknown") -> Dict[str, float]:
         if isinstance(market_data, dict):
             recommended_price = market_data.get("recommended_price_range", {}).get("optimal", base_cost * 1.35)
         elif isinstance(market_data, (int, float)):
@@ -415,11 +610,15 @@ Important: Ensure optimal price is between low and high, and all prices are real
             prompt = f"""
 Calculate optimal selling price for flooring product.
 
+Product: {product_name} ({width})
+Location/Zip Code: {location}
 Base Cost: ${base_cost:.2f} per sqft
 Recommended Market Price: ${recommended_price:.2f} per sqft
 Current Markup: {markup_percentage:.1f}%
 Market Demand: {demand}
 Market Factors: {', '.join(market_factors) if market_factors else 'Standard conditions'}
+
+Context: Adjust pricing based on local market conditions for this specific location ({location}) and product type.
 
 Return ONLY valid JSON:
 {{

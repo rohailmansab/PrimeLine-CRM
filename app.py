@@ -659,7 +659,13 @@ def render_quote_page():
                     if gemini and gemini.initialized:
                         try:
                             print(f"Calculating quote with Gemini (base price: ${base_price:.2f})...")
-                            quote_data = gemini.calculate_quote(base_price, market_data)
+                            quote_data = gemini.calculate_quote(
+                                base_price, 
+                                market_data,
+                                product_name=product,
+                                width=width,
+                                location=location
+                            )
                             print(f"Gemini quote: {quote_data}")
                         except Exception as e:
                             print(f"Gemini calculation failed: {str(e)}")

@@ -820,6 +820,80 @@ def render_quote_page():
 def render_analytics_page():
     st.header("📊 Analytics Dashboard")
     
+    # --- AI Market Pricing Lookup (Admin & Super Admin Only) ---
+    user_id = st.session_state.get('user_id')
+    is_admin = db.is_user_admin(user_id) if user_id else False
+    
+    if is_admin:
+        with st.container(border=True):
+            st.subheader("🤖 AI Market Pricing Lookup")
+            st.caption("On-demand market pricing analysis for any product and location.")
+            
+            products_data = db.get_products()
+            if products_data:
+                product_names = sorted(list(set(p['name'] for p in products_data)))
+                
+                lcol1, lcol2, lcol3 = st.columns([2, 1, 1])
+                
+                with lcol1:
+                    selected_product = st.selectbox("Select Product", options=product_names, key="lookup_product")
+                
+                with lcol2:
+                    available_widths = sorted(list(set(p['width'] for p in products_data if p['name'] == selected_product)))
+                    selected_width = st.selectbox("Select Width", options=available_widths, key="lookup_width")
+                
+                with lcol3:
+                    lookup_zip = st.text_input("Zip Code", placeholder="e.g. 90210", key="lookup_zip")
+                
+                if st.button("🔍 Get AI Pricing", type="primary", use_container_width=True):
+                    if not lookup_zip:
+                        st.error("⚠️ Please enter a Zip Code to perform the lookup.")
+                    else:
+                        with st.spinner(f"AI is analyzing market data for {selected_product} in {lookup_zip}..."):
+                            try:
+                                # Find the product to get its base cost
+                                matching_p = next((p for p in products_data if p['name'] == selected_product and p['width'] == selected_width), None)
+                                base_price = matching_p['standard_price'] if matching_p else 4.0
+                                
+                                product_with_price = {
+                                    "name": selected_product,
+                                    "width": selected_width,
+                                    "base_price": base_price
+                                }
+                                
+                                # Call AI logic
+                                market_data = get_market_data(lookup_zip, product_with_price)
+                                
+                                if gemini and gemini.initialized:
+                                    quote_data = gemini.calculate_quote(
+                                        base_price, 
+                                        market_data,
+                                        product_name=selected_product,
+                                        width=selected_width,
+                                        location=lookup_zip
+                                    )
+                                    
+                                    if quote_data:
+                                        st.success("✅ AI Analysis Complete")
+                                        
+                                        # Display Results
+                                        res_col1, res_col2 = st.columns(2)
+                                        with res_col1:
+                                            st.metric("Suggested Retail Price", f"${quote_data.get('suggested_retail_price', 0):.2f}", help="Market rate for end consumers")
+                                        with res_col2:
+                                            st.metric("Suggested Dealer Price", f"${quote_data.get('suggested_dealer_price', 0):.2f}", help="Market rate for contractors/dealers")
+                                        
+                                        st.info(f"📊 **Analysis Context:** {selected_product} ({selected_width}) in {lookup_zip} | Generated at {datetime.now().strftime('%H:%M:%S')}")
+                                    else:
+                                        st.error("AI could not generate pricing data. Please try again.")
+                                else:
+                                    st.error("Gemini AI is not initialized. Please check your API key.")
+                            except Exception as e:
+                                st.error(f"Error during AI lookup: {str(e)}")
+            else:
+                st.info("No product data available for lookup.")
+        st.divider()
+    
     col1, col2 = st.columns(2)
     
     with col1:

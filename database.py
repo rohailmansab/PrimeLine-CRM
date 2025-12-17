@@ -69,6 +69,24 @@ class Database:
             c.execute('''CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)''')
             c.execute('''CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)''')
             
+            # Customers table
+            c.execute('''CREATE TABLE IF NOT EXISTS customers
+                        (id CHAR(32) PRIMARY KEY,
+                         full_name VARCHAR(255) NOT NULL,
+                         email VARCHAR(255) NOT NULL,
+                         phone VARCHAR(50),
+                         location VARCHAR(255),
+                         notes TEXT,
+                         is_deleted BOOLEAN DEFAULT 0,
+                         deleted_at DATETIME,
+                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                         user_id INTEGER,
+                         business_name TEXT,
+                         zip_code TEXT,
+                         customer_type TEXT DEFAULT 'contractor',
+                         FOREIGN KEY(user_id) REFERENCES users(id))''')
+            
             c.execute('''CREATE TABLE IF NOT EXISTS products
                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
                          name TEXT NOT NULL,

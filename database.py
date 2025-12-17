@@ -128,6 +128,10 @@ class Database:
                          final_price REAL,
                          user_id INTEGER,
                          status TEXT DEFAULT 'pending_admin_approval',
+                         ai_retail_price REAL,
+                         ai_dealer_price REAL,
+                         ai_zip_code TEXT,
+                         ai_generated_at TIMESTAMP,
                          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                          FOREIGN KEY(user_id) REFERENCES users(id))''')
             
@@ -489,28 +493,28 @@ class Database:
         finally:
             conn.close()
 
-    def create_quote(self, customer_name, location, product_specs, quantity, total_price, user_id=None, status='pending_admin_approval',
+    def create_quote(self, customer_name, location, product_specs, quantity, final_price, user_id=None, status='pending_admin_approval',
                     ai_retail_price=None, ai_dealer_price=None, ai_zip_code=None, ai_generated_at=None):
         conn = self.get_connection()
         try:
             c = conn.cursor()
             c.execute('''INSERT INTO quotes 
-                        (customer_name, location, product_specs, quantity, total_price, user_id, status,
+                        (customer_name, location, product_specs, quantity, final_price, user_id, status,
                          ai_retail_price, ai_dealer_price, ai_zip_code, ai_generated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                      (customer_name, location, product_specs, quantity, total_price, user_id, status,
+                      (customer_name, location, product_specs, quantity, final_price, user_id, status,
                        ai_retail_price, ai_dealer_price, ai_zip_code, ai_generated_at))
             conn.commit()
             return c.lastrowid
         finally:
             conn.close()
 
-    def update_quote(self, quote_id, total_price):
-        """Update quote details (currently only total_price supported for edit)"""
+    def update_quote(self, quote_id, final_price):
+        """Update quote details (currently only final_price supported for edit)"""
         conn = self.get_connection()
         try:
             c = conn.cursor()
-            c.execute("UPDATE quotes SET total_price = ? WHERE id = ?", (total_price, quote_id))
+            c.execute("UPDATE quotes SET final_price = ? WHERE id = ?", (final_price, quote_id))
             conn.commit()
             return True
         except Exception as e:

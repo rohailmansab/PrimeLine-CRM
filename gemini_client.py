@@ -15,14 +15,14 @@ class GeminiClient:
                 raise ValueError("Invalid API key format")
             
             genai.configure(api_key=api_key)
-            # Using gemini-1.5-flash for better stability/availability
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            # Using gemini-pro for maximum compatibility across API versions
+            self.model = genai.GenerativeModel('gemini-pro')
             
             # Test the connection
             test_response = self.model.generate_content("Hello")
             if test_response:
                 self.initialized = True
-                print(f"[OK] Successfully initialized gemini-1.5-flash")
+                print(f"[OK] Successfully initialized gemini-pro")
         except Exception as e:
             self.init_error = str(e)
             print(f"[ERROR] Gemini initialization error: {self.init_error}")

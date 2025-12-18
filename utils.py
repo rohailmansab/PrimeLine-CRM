@@ -3,7 +3,7 @@ import re
 from typing import Dict, Any, Optional
 
 # Initialize US ZIP code database
-nomi = pgeocode.NominalData('us')
+nomi = pgeocode.Nominatim('us')
 
 def validate_zip_code(zip_code: str) -> Optional[Dict[str, Any]]:
     """

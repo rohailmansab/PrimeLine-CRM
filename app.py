@@ -825,6 +825,21 @@ def render_analytics_page():
     is_admin = db.is_user_admin(user_id) if user_id else False
     
     if is_admin:
+        # --- DEBUG: List Models (Temporary) ---
+        if st.checkbox("🛠️ Debug: List Available AI Models"):
+            try:
+                import google.generativeai as genai
+                if GEMINI_API_KEY:
+                    genai.configure(api_key=GEMINI_API_KEY)
+                    models = genai.list_models()
+                    st.write("Available models for your API key:")
+                    for m in models:
+                        st.code(f"Name: {m.name}\nMethods: {m.supported_generation_methods}")
+                else:
+                    st.error("No API Key found for debug.")
+            except Exception as e:
+                st.error(f"Debug error: {str(e)}")
+        
         with st.container(border=True):
             st.subheader("🤖 AI Market Pricing Lookup")
             st.caption("On-demand market pricing analysis for any product and location.")

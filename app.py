@@ -633,8 +633,6 @@ def render_quote_page():
                         ai_generated_at=datetime.now()
                     )
                     
-                    st.success("✓ Quote Submitted for Approval!")
-                    
                     if is_admin:
                         st.info("Your quote has been sent to the admin for review.")
                         st.write("---")
@@ -672,13 +670,13 @@ def render_quote_page():
                                     if suggested_dealer:
                                         st.metric("Suggested Dealer Price", format_currency(suggested_dealer))
                     else:
-                        st.info("ℹ️ Quote submitted for admin review")
+                        st.info("✓ Quote Submitted for Approval!")
+                        st.info("ℹ️ Your quote has been sent to the admin for review.")
                         uc1, uc2, uc3 = st.columns(3)
                         with uc1:
-                            if suggested_retail:
-                                st.metric("Suggested Retail Price", format_currency(suggested_retail))
-                            else:
-                                st.metric("Suggested Retail Price", "Pending")
+                            # Users only see the total rounded suggested retail
+                            display_total = round(total)
+                            st.metric("Suggested Retail Total", f"${display_total:,}")
                         with uc2:
                             st.metric("Quantity", f"{quantity} sqft")
                         with uc3:

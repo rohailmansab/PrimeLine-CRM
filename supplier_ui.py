@@ -138,8 +138,15 @@ def render_supplier_page(db, email_handler, gemini):
                         with c1:
                             st.markdown(f"### {s.get('name', 'Unknown')}")
                             st.caption(f"📧 {s.get('email', '-')}")
-                            if s.get('contact_info'):
-                                st.write(f"📝 {s.get('contact_info')}")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                if s.get('phone'): st.write(f"📞 {s.get('phone')}")
+                                if s.get('zip_code'): st.write(f"📍 {s.get('zip_code')}")
+                            with col_b:
+                                if s.get('address'): st.write(f"🏠 {s.get('address')}")
+                            
+                            if s.get('additional_info'):
+                                st.write(f"📝 {s.get('additional_info')}")
                         with c2:
                             st.write("") # Placeholder for actions if needed
                         st.divider()
@@ -147,9 +154,12 @@ def render_supplier_page(db, email_handler, gemini):
         with col2:
             st.subheader("Add New Supplier")
             with st.form("new_supplier"):
-                name = st.text_input("Supplier Name")
-                email = st.text_input("Email")
-                contact = st.text_area("Additional Info")
+                name = st.text_input("Supplier Name*")
+                email = st.text_input("Email*")
+                phone = st.text_input("Phone")
+                address = st.text_input("Address")
+                zip_code = st.text_input("Zip Code")
+                additional_info = st.text_area("Additional Info")
                 
                 if st.form_submit_button("Add Supplier", type="primary", use_container_width=True):
                     if not name:
@@ -168,7 +178,7 @@ def render_supplier_page(db, email_handler, gemini):
                             if any(supplier['email'] == email for supplier in existing_suppliers):
                                 st.error("A supplier with this email already exists")
                             else:
-                                db.add_supplier(name, email, contact)
+                                db.add_supplier(name, email, phone, address, zip_code, additional_info)
                                 st.success(f"Added supplier: {name}")
                                 time.sleep(0.5)
                                 st.rerun()

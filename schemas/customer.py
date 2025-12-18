@@ -32,7 +32,7 @@ class CustomerInteractionRead(CustomerInteractionBase):
 
 class CustomerBase(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=100)
-    business_name: Optional[str] = None
+    business_name: str = Field(..., min_length=1)
     email: EmailStr
     phone: str = Field(..., min_length=1) # Mandatory
     zip_code: str = Field(..., min_length=1) # Mandatory

@@ -82,7 +82,7 @@ class Database:
                          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                          user_id INTEGER,
-                         business_name TEXT,
+                         business_name TEXT NOT NULL,
                          zip_code TEXT,
                          customer_type TEXT DEFAULT 'contractor',
                          FOREIGN KEY(user_id) REFERENCES users(id))''')
@@ -104,11 +104,16 @@ class Database:
                          volume_discounts TEXT,
                          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
                          
+            # Suppliers table
             c.execute('''CREATE TABLE IF NOT EXISTS suppliers
                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
                          name TEXT NOT NULL UNIQUE,
                          email TEXT NOT NULL UNIQUE,
-                         contact_info TEXT,
+                         phone TEXT,
+                         address TEXT,
+                         zip_code TEXT,
+                         additional_info TEXT,
+                         is_active INTEGER DEFAULT 1,
                          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
                          
             c.execute('''CREATE TABLE IF NOT EXISTS price_requests
@@ -128,6 +133,7 @@ class Database:
                          final_price REAL,
                          user_id INTEGER,
                          status TEXT DEFAULT 'pending_admin_approval',
+                         rejection_reason TEXT,
                          ai_retail_price REAL,
                          ai_dealer_price REAL,
                          ai_zip_code TEXT,
@@ -177,7 +183,7 @@ class Database:
             try:
                 c.execute("SELECT business_name FROM customers LIMIT 1")
             except:
-                c.execute("ALTER TABLE customers ADD COLUMN business_name TEXT")
+                c.execute("ALTER TABLE customers ADD COLUMN business_name TEXT DEFAULT 'N/A'")
                 print("✓ Added business_name column to customers table")
 
             # Migration: Add zip_code column to customers table
@@ -242,15 +248,20 @@ class Database:
                 c.execute("ALTER TABLE products ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)")
                 print("✓ Added supplier_id column to products table")
 
-            # Migration: Add AI pricing columns to quotes table
+            # Migration: Add rejection_reason to quotes
             try:
-                c.execute("SELECT ai_retail_price FROM quotes LIMIT 1")
+                c.execute("SELECT rejection_reason FROM quotes LIMIT 1")
             except:
-                c.execute("ALTER TABLE quotes ADD COLUMN ai_retail_price REAL")
-                c.execute("ALTER TABLE quotes ADD COLUMN ai_dealer_price REAL")
-                c.execute("ALTER TABLE quotes ADD COLUMN ai_zip_code TEXT")
-                c.execute("ALTER TABLE quotes ADD COLUMN ai_generated_at TIMESTAMP")
-                print("✓ Added AI pricing columns to quotes table")
+                c.execute("ALTER TABLE quotes ADD COLUMN rejection_reason TEXT")
+                print("✓ Added rejection_reason column to quotes table")
+
+            # Migration: Add new columns to suppliers
+            for col in ['phone', 'address', 'zip_code', 'additional_info']:
+                try:
+                    c.execute(f"SELECT {col} FROM suppliers LIMIT 1")
+                except:
+                    c.execute(f"ALTER TABLE suppliers ADD COLUMN {col} TEXT")
+                    print(f"✓ Added {col} column to suppliers table")
 
             # Sync History table for automated tasks
             c.execute('''CREATE TABLE IF NOT EXISTS sync_history
@@ -431,13 +442,14 @@ class Database:
         finally:
             conn.close()
 
-    def add_supplier(self, name: str, email: str, contact_info: str = None) -> int:
+    def add_supplier(self, name: str, email: str, phone: str = None, address: str = None, 
+                    zip_code: str = None, additional_info: str = None) -> int:
         conn = self.get_connection()
         try:
             c = conn.cursor()
-            c.execute('''INSERT INTO suppliers (name, email, contact_info)
-                        VALUES (?, ?, ?)''',
-                     (name.strip(), email.strip(), contact_info))
+            c.execute('''INSERT INTO suppliers (name, email, phone, address, zip_code, additional_info)
+                        VALUES (?, ?, ?, ?, ?, ?)''',
+                     (name.strip(), email.strip(), phone, address, zip_code, additional_info))
             conn.commit()
             return c.lastrowid
         finally:
@@ -487,7 +499,7 @@ class Database:
         conn = self.get_connection()
         try:
             c = conn.cursor()
-            c.execute('''SELECT id, name, email, contact_info, created_at 
+            c.execute('''SELECT id, name, email, phone, address, zip_code, additional_info, is_active, created_at 
                         FROM suppliers ORDER BY name''')
             return [dict(row) for row in c.fetchall()]
         finally:
@@ -509,16 +521,50 @@ class Database:
         finally:
             conn.close()
 
-    def update_quote(self, quote_id, final_price):
-        """Update quote details (currently only final_price supported for edit)"""
+    def update_quote(self, quote_id, final_price, quantity=None, location=None, product_specs=None):
+        """Update quote details"""
         conn = self.get_connection()
         try:
             c = conn.cursor()
-            c.execute("UPDATE quotes SET final_price = ? WHERE id = ?", (final_price, quote_id))
+            updates = ["final_price = ?"]
+            params = [final_price]
+            
+            if quantity is not None:
+                updates.append("quantity = ?")
+                params.append(quantity)
+            if location is not None:
+                updates.append("location = ?")
+                params.append(location)
+            if product_specs is not None:
+                updates.append("product_specs = ?")
+                params.append(product_specs)
+                
+            params.append(quote_id)
+            query = f"UPDATE quotes SET {', '.join(updates)} WHERE id = ?"
+            
+            c.execute(query, params)
             conn.commit()
             return True
         except Exception as e:
             print(f"Error updating quote: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def update_quote_status(self, quote_id, status, reason=None):
+        """Update quote status with optional rejection reason"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            if reason:
+                c.execute("UPDATE quotes SET status = ?, rejection_reason = ? WHERE id = ?", 
+                         (status, reason, quote_id))
+            else:
+                c.execute("UPDATE quotes SET status = ? WHERE id = ?", (status, quote_id))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error updating quote status: {e}")
             return False
         finally:
             conn.close()

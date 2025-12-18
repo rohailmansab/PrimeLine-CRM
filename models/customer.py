@@ -48,7 +48,7 @@ class Customer(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     full_name = Column(String(255), index=True, nullable=False)
-    business_name = Column(String(255), nullable=True)
+    business_name = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     phone = Column(String(50), nullable=False) # Made mandatory per requirements
     zip_code = Column(String(20), nullable=False) # Made mandatory per requirements
@@ -57,7 +57,7 @@ class Customer(Base):
     notes = Column(Text, nullable=True)
     
     # User association - nullable for backward compatibility
-    user_id = Column('user_id', String(36), nullable=True)  # Using String for SQLite compatibility
+    user_id = Column('user_id', Integer, nullable=True)
     
     # Soft delete
     is_deleted = Column(Boolean, default=False, index=True)

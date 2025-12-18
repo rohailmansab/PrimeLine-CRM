@@ -18,7 +18,7 @@ class CustomerRepository:
     def get_by_email(self, email: str) -> Optional[Customer]:
         return self.db.query(Customer).filter(Customer.email == email).first()
 
-    def create(self, customer: CustomerCreate, user_id: str = None) -> Customer:
+    def create(self, customer: CustomerCreate, user_id: int = None) -> Customer:
         db_customer = Customer(
             full_name=customer.full_name,
             business_name=customer.business_name,
@@ -96,7 +96,7 @@ class CustomerRepository:
         limit: int = 100, 
         search_query: str = None, 
         include_deleted: bool = False,
-        user_id: str = None,
+        user_id: int = None,
         is_admin: bool = False
     ) -> Tuple[List[Customer], int]:
         """List customers with user filtering. Admins see all, regular users see only their customers + shared."""

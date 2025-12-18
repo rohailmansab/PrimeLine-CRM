@@ -43,8 +43,8 @@ def add_customer_dialog():
         submitted = st.form_submit_button("Create Customer", type="primary")
         
         if submitted:
-            if not full_name or not email or not phone or not zip_code:
-                st.error("Name, Email, Phone, and Zip Code are required.")
+            if not full_name or not business_name or not email or not phone or not zip_code:
+                st.error("Name, Business Name, Email, Phone, and Zip Code are required.")
                 return
             
             try:
@@ -63,7 +63,7 @@ def add_customer_dialog():
                     notes=notes
                 )
                 # Associate customer with logged-in user
-                user_id = str(st.session_state.user_id) if 'user_id' in st.session_state else None
+                user_id = int(st.session_state.user_id) if 'user_id' in st.session_state else None
                 repo.create(new_customer, user_id=user_id)
                 st.session_state.refresh_key = time.time() # Trigger refresh
                 st.rerun()
@@ -102,8 +102,8 @@ def edit_customer_dialog(customer_id, current_name, current_business, current_em
         submitted = st.form_submit_button("Update Customer", type="primary")
         
         if submitted:
-            if not full_name or not email or not phone or not zip_code:
-                st.error("Name, Email, Phone, and Zip Code are required.")
+            if not full_name or not business_name or not email or not phone or not zip_code:
+                st.error("Name, Business Name, Email, Phone, and Zip Code are required.")
                 return
             
             try:
@@ -137,7 +137,11 @@ def log_interaction_dialog(customer_id, customer_name):
         status = st.selectbox(
             "Interaction Type",
             options=[s.value for s in InteractionStatus],
-            format_func=lambda x: x.title()
+            format_func=lambda x: {
+                "called": "📞 Called",
+                "emailed": "📧 Emailed",
+                "spoke": "🗣️ Spoke to Customer"
+            }.get(x, x.title())
         )
         
         notes = st.text_area("Notes", placeholder="What was discussed?")

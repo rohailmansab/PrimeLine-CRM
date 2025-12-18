@@ -99,10 +99,16 @@ def render_user_management_tab(db: Database):
                 st.write("### Actions")
                 
                 # Role Management
+                role_options = ['user', 'admin']
+                if current_user_role == 'super_admin':
+                    role_options.append('super_admin')
+                
+                # If target is super_admin and current is admin, we already continued above
+                
                 new_role = st.selectbox(
                     "Change Role",
-                    options=['user', 'admin', 'super_admin'],
-                    index=['user', 'admin', 'super_admin'].index(target_user_role) if target_user_role in ['user', 'admin', 'super_admin'] else 0,
+                    options=role_options,
+                    index=role_options.index(target_user_role) if target_user_role in role_options else 0,
                     key=f"role_select_{user_id}"
                 )
                 

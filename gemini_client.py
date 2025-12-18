@@ -335,6 +335,7 @@ IMPORTANT RULES:
     def generate_market_analysis(self, location: str, product_specs: Dict[str, Any]) -> Dict[str, Any]:
         base_price = product_specs.get("cost", product_specs.get("base_price", 4.0))
         
+        # Fallback response is now only used if AI explicitly fails or is disabled
         fallback_response = {
             "recommended_price_range": {
                 "low": round(base_price * 1.2, 2),
@@ -364,10 +365,15 @@ Product: {product_name}
 Base Cost: ${base_price:.2f} per sqft
 Specifications: {json.dumps(product_specs)}
 
-Provide market analysis with competitive pricing recommendations.
+CRITICAL INSTRUCTIONS:
+1. ONLY provide analysis if you have specific market data for the location: {location}.
+2. If the location is invalid, ambiguous, or you lack specific data for it, return an empty JSON object {{}}.
+3. DO NOT provide generic or national average pricing as a fallback.
+4. Your response MUST include a "verified_location" field confirming the city/area you are analyzing.
 
 Return ONLY valid JSON with this exact structure:
 {{
+  "verified_location": "<city, state>",
   "recommended_price_range": {{
     "low": <float>,
     "high": <float>,
@@ -386,6 +392,10 @@ Return ONLY valid JSON with this exact structure:
             response = self.model.generate_content(prompt)
             result = self._parse_json_response(response.text)
             
+            if not result or "verified_location" not in result:
+                print(f"Market analysis rejected: No location context for {location}")
+                return {} # Return empty to indicate failure
+                
             if result and "recommended_price_range" in result:
                 price_range = result["recommended_price_range"]
                 if all(k in price_range for k in ["low", "high", "optimal"]):
@@ -399,34 +409,29 @@ Return ONLY valid JSON with this exact structure:
                     except (ValueError, TypeError):
                         pass
             
-            print("Market analysis returned invalid format, using fallback")
-            return fallback_response
+            print("Market analysis returned invalid format or was rejected")
+            return {}
             
         except Exception as e:
-            print(f"Market analysis error: {str(e)}, using fallback")
-            return fallback_response
+            print(f"Market analysis error: {str(e)}")
+            return {}
 
     def calculate_quote(self, base_cost: float, market_data: Any, product_name: str = "Unknown", width: str = "Unknown", location: str = "Unknown") -> Dict[str, float]:
         if isinstance(market_data, dict):
             recommended_price = market_data.get("recommended_price_range", {}).get("optimal", base_cost * 1.35)
+            verified_loc = market_data.get("verified_location", location)
         elif isinstance(market_data, (int, float)):
             recommended_price = float(market_data)
+            verified_loc = location
         else:
             recommended_price = base_cost * 1.35
+            verified_loc = location
         
         markup_percentage = ((recommended_price - base_cost) / base_cost) * 100 if base_cost > 0 else 30.0
         
-        fallback_response = {
-            "selling_price": round(recommended_price, 2),
-            "margin": round(markup_percentage, 1),
-            "confidence": 0.7,
-            "suggested_retail_price": round(base_cost * 2.0, 2),
-            "suggested_dealer_price": round(base_cost * 1.4, 2)
-        }
-        
         if not self.initialized or not self.model:
             print(f"Gemini not initialized (initialized={self.initialized}, model={self.model is not None})")
-            return fallback_response
+            return {}
         
         try:
             market_factors = []
@@ -441,16 +446,23 @@ Calculate optimal selling price for flooring product.
 
 Product: {product_name} ({width})
 Location/Zip Code: {location}
+Verified Location Context: {verified_loc}
 Base Cost: ${base_cost:.2f} per sqft
 Recommended Market Price: ${recommended_price:.2f} per sqft
 Current Markup: {markup_percentage:.1f}%
 Market Demand: {demand}
 Market Factors: {', '.join(market_factors) if market_factors else 'Standard conditions'}
 
-Context: Adjust pricing based on local market conditions for this specific location ({location}) and product type.
+CRITICAL INSTRUCTIONS:
+1. ONLY calculate pricing if you can verify market conditions for {location}.
+2. If the location is unsupported or data is unavailable, return an empty JSON object {{}}.
+3. DO NOT return generic prices.
+4. Your response MUST include a "location_confirmed" field (boolean) and "analysis_summary" mentioning the location.
 
 Return ONLY valid JSON:
 {{
+  "location_confirmed": true,
+  "analysis_summary": "Pricing analysis for {location}...",
   "selling_price": <float>,
   "margin": <percentage as float>,
   "confidence": <float between 0 and 1>,
@@ -462,7 +474,7 @@ Return ONLY valid JSON:
             response = self.model.generate_content(prompt)
             result = self._parse_json_response(response.text)
             
-            if result and "selling_price" in result:
+            if result and result.get("location_confirmed") is True:
                 try:
                     selling_price = float(result["selling_price"])
                     margin = float(result.get("margin", markup_percentage))
@@ -476,16 +488,17 @@ Return ONLY valid JSON:
                             "margin": round(margin, 1),
                             "confidence": round(confidence, 2),
                             "suggested_retail_price": round(retail, 2),
-                            "suggested_dealer_price": round(dealer, 2)
+                            "suggested_dealer_price": round(dealer, 2),
+                            "analysis_summary": result.get("analysis_summary", "")
                         }
                 except (ValueError, TypeError) as e:
                     print(f"Error parsing quote values: {str(e)}")
             
-            return fallback_response
+            return {}
             
         except Exception as e:
             print(f"Quote calculation error: {str(e)}")
-            return fallback_response
+            return {}
     
     def generate_customer_quote_email(self, quote_data: Dict[str, Any]) -> str:
         if not self.initialized:

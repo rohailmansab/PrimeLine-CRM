@@ -1,48 +1,3 @@
-# import streamlit as st
-# from email_handler import send_price_request, read_reply_and_save
-# from quote_generator import generate_quote
-# from database import init_db
-# import pandas as pd
-# import sqlite3
-
-# init_db()
-
-# st.title("Flooring AI Demo")
-# tab1, tab2, tab3 = st.tabs(["Update Prices", "Generate Quote", "Leads"])
-
-# # === Function 1 ===
-# with tab1:
-#     if st.button("Send Price Request Email"):
-#         send_price_request()
-#         st.success("Email sent to supplier!")
-
-#     if st.button("Check Reply & Save Price"):
-#         read_reply_and_save()
-
-# # === Function 2 ===
-# with tab2:
-#     with st.form("quote_form"):
-#         city = st.text_input("City", "Raleigh, NC")
-#         product = st.text_input("Product", "White Oak")
-#         width = st.text_input("Width", "5\"")
-#         sqft = st.number_input("Square Feet", 100, 10000, 5000)
-#         submitted = st.form_submit_button("Generate Quote")
-
-#         if submitted:
-#             quote = generate_quote(city, product, width, sqft)
-#             st.success(f"Quote: ${quote['total']} (${quote['selling_price']}/sqft)")
-
-# # === Function 3 ===
-# with tab3:
-#     st.write("Demo Leads (Manual + AI Summary)")
-#     leads = [
-#         {"Name": "John", "City": "Raleigh", "Need": "5\" oak, 3000 sqft", "Source": "FB Group"},
-#         {"Name": "Sarah", "City": "Cary", "Need": "Refinish old floors", "Source": "Reddit"}
-#     ]
-#     st.dataframe(leads)
-
-
-
 # app.py
 import streamlit as st
 import pandas as pd
@@ -59,6 +14,7 @@ from gemini_client import GeminiClient
 from email_handler import EmailHandler
 from auth_ui import render_authentication_gate
 from customer_ui import render_customer_page
+from utils import validate_zip_code
 from config import (
     GEMINI_API_KEY, DATABASE_PATH, EMAIL_TEMPLATES,
     THEME, SAMPLE_PRODUCTS, SAMPLE_SUPPLIERS
@@ -66,7 +22,7 @@ from config import (
 
 # ===================== UI SETUP =====================
 st.set_page_config(
-    page_title="Flooring AI Sales System",
+    page_title="PrimeLine Flooring AI Sales System",
     page_icon="🏢",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -311,40 +267,23 @@ def clear_database_cache():
     st.cache_resource.clear()
 
 def get_market_data(location: str, product: Dict[str, Any]) -> Dict[str, Any]:
-    """Get market analysis with fallback handling"""
-    
-    def get_default_analysis():
-        base_price = product.get("base_price", 4.0)
-        return {
-            "recommended_price_range": {
-                "low": round(base_price * 1.2, 2),
-                "high": round(base_price * 1.6, 2),
-                "optimal": round(base_price * 1.3, 2)
-            },
-            "market_factors": ["Using standard industry margins"],
-            "competitor_analysis": {
-                "average_market_price": round(base_price * 1.4, 2),
-                "price_positioning": "mid-range"
-            },
-            "seasonal_adjustment": 0,
-            "demand_indicator": "medium"
-        }
-    
+    """Get market analysis without fallback handling"""
+    if not gemini or not gemini.initialized:
+        return {}
+        
     try:
-        if not gemini or not gemini.initialized:
-            return get_default_analysis()
-            
         analysis = gemini.generate_market_analysis(
             location,
             {"name": product["name"], "cost": product.get("base_price", 4.0), "specs": product}
         )
         if not analysis:
-            raise Exception("Empty analysis received")
+            print(f"[LOG] Market analysis returned empty for {location}")
+            return {}
         return analysis
     except Exception as e:
-        return get_default_analysis()
+        print(f"[LOG] Market analysis error for {location}: {str(e)}")
+        return {}
 
-# ===================== EMAIL =====================
 # ===================== SIDEBAR =====================
 def render_sidebar():
     with st.sidebar:
@@ -362,28 +301,21 @@ def render_sidebar():
             </div>
         ''', unsafe_allow_html=True)
         
-
-        
         st.divider()
         
         # Navigation Menu
-        # Show admin badge if user is admin
         is_admin = st.session_state.get('is_admin', False)
         if is_admin:
             st.info("👑 Admin Access")
         
-        # Conditional navigation based on admin status
-        # Conditional navigation based on admin status
         role = st.session_state.get('role', 'user')
         
         if role in ['super_admin', 'admin']:
-             # Admins see Admin Dashboard + other tools
             selected = st.radio(
                 "Go to",
                 ["🛡️ Admin Dashboard", "📧 Supplier Management", "💰 Quote Generator", "📊 Analytics", "👥 Customers", "📜 Customer History"]
             )
         else:
-            # Regular users don't see Admin Dashboard or Supplier Management
             selected = st.radio(
                 "Go to",
                 ["💰 Quote Generator", "👥 Customers", "📜 Customer History", "📊 Analytics"]
@@ -402,9 +334,6 @@ def render_sidebar():
                 st.caption("✅ Remember me active (30 days)")
             else:
                 st.caption("⏱️ Session expires in 45 mins")
-        
-        with col2:
-            st.write("")  # Spacer
         
         # Sign Out Button
         if st.button("🚪 Sign Out", use_container_width=True, type="secondary"):
@@ -429,9 +358,7 @@ def render_sidebar():
         # Sidebar Status
         st.subheader("System Status")
         
-        # Assuming gmail_status, db, and gemini are available in the scope where render_sidebar is called
-        # or passed as arguments. For this edit, we'll assume they are accessible.
-        if 'gmail_status' in st.session_state: # Added a check for gmail_status existence
+        if 'gmail_status' in st.session_state:
             if st.session_state.gmail_status == "connected":
                 st.success("Gmail: Connected")
             elif st.session_state.gmail_status == "not_configured":
@@ -439,14 +366,14 @@ def render_sidebar():
             else:
                 st.error("Gmail: Authentication Error")
         else:
-            st.warning("Gmail: Status Unknown") # Fallback if gmail_status is not set
+            st.warning("Gmail: Status Unknown")
         
-        if 'db' in globals() and db: # Check if db is defined and not None
+        if 'db' in globals() and db:
             st.success("Database: Connected")
         else:
             st.error("Database: Disconnected")
         
-        if 'gemini' in globals() and gemini: # Check if gemini is defined and not None
+        if 'gemini' in globals() and gemini:
             st.success("AI Engine: Online")
         else:
             st.warning("AI Engine: Offline")
@@ -478,10 +405,7 @@ def render_sidebar():
                             if 'scheduler' not in globals():
                                 scheduler = SchedulerService(db, email_handler, gemini)
                             
-                            # Run both tasks
                             scheduler.daily_reply_check()
-                            # We don't force weekly update as it sends emails to everyone
-                            
                             st.toast("Sync completed!", icon="✅")
                             time.sleep(1)
                             st.rerun()
@@ -495,7 +419,6 @@ def render_sidebar():
         st.subheader("Quick Stats")
         col1, col2 = st.columns(2)
         
-        # Fetch real stats with caching
         @st.cache_data(ttl=300)
         def get_sidebar_stats(refresh_key):
             try:
@@ -505,7 +428,6 @@ def render_sidebar():
             except:
                 return 0, 0
         
-        # Use session state key to force refresh when needed
         active_count, pending_count = get_sidebar_stats(st.session_state.get('db_refresh_key', 0))
         
         with col1:
@@ -515,15 +437,10 @@ def render_sidebar():
             
         return selected
 
-# ===================== SUPPLIER MANAGEMENT =====================
-# Logic moved to supplier_ui.py
-
-
 # ===================== QUOTE GENERATOR =====================
 def render_quote_page():
     st.header("💰 Quote Generator")
     
-    # Error handling for database connection
     try:
         products = db.get_products()
         if not products:
@@ -538,13 +455,11 @@ def render_quote_page():
     with col1:
         st.subheader("Generate New Quote")
         
-        # Initialize session state for form fields
         if 'selected_product' not in st.session_state:
             st.session_state.selected_product = sorted(set(p["name"] for p in products))[0]
         if 'selected_width' not in st.session_state:
             st.session_state.selected_width = None
         
-        # Product selector
         product_names = sorted(set(p["name"] for p in products))
         product = st.selectbox(
             "Product",
@@ -553,29 +468,24 @@ def render_quote_page():
             on_change=lambda: st.session_state.update({"selected_width": None})
         )
         
-        # Get widths for selected product from database
         product_widths = sorted(set(p["width"] for p in products if p["name"] == product))
         
         if not product_widths:
             st.error(f"No widths found for {product}")
             return
         
-        # Width selector - always updated based on selected product
         width = st.selectbox(
             "Width",
             options=product_widths,
             key="width_select"
         )
         
-        # Customer Selection
         from repositories.customer_repository import CustomerRepository
         from models.base import SessionLocal
         
-        # Use a new session for the repository
         session = SessionLocal()
         try:
             customer_repo = CustomerRepository(session)
-            # Filter customers by user
             user_id = st.session_state.get('user_id')
             is_admin = db.is_user_admin(user_id) if user_id else False
             customers, _ = customer_repo.list_customers(
@@ -610,7 +520,7 @@ def render_quote_page():
             use_ai_reference = True
             is_admin = st.session_state.get('role') in ['admin', 'super_admin']
             if is_admin:
-                use_ai_reference = st.checkbox("Use AI Suggested Price as Reference Only", value=True, help="If checked, quote will use Standard Price (Base + 30%). AI price will be shown for info only.")
+                use_ai_reference = st.checkbox("Use AI Suggested Price as Reference Only", value=True)
             
             submitted = st.form_submit_button("Submit for Approval", type="primary", use_container_width=True)
     
@@ -629,7 +539,6 @@ def render_quote_page():
                         st.error(f"Product {product} {width} not found in database")
                         return
                     
-                    # Get actual pricing from database
                     standard_price = matching_product.get('standard_price', 0)
                     cost_price = matching_product.get('cost_price', 0)
                     discount_pct = matching_product.get('discount_percentage', 0)
@@ -637,12 +546,10 @@ def render_quote_page():
                     start_date = matching_product.get('promotion_start_date')
                     end_date = matching_product.get('promotion_end_date')
                     
-                    # Determine if promotion is active and calculate effective price
                     promo_active = False
                     if discount_pct and discount_pct > 0 and start_date and end_date:
                         promo_active = db.is_promotion_active(start_date, end_date)
                     
-                    # Calculate base price for quote - use standard price, apply discount if active
                     if promo_active:
                         base_price = standard_price * (1 - discount_pct / 100)
                     else:
@@ -657,40 +564,48 @@ def render_quote_page():
                         "width": width,
                         "base_price": base_price
                     }
+                    
+                    # 1. ZIP CODE VALIDATION
+                    location_data = validate_zip_code(location)
+                    verified_loc = location
+                    
+                    if location_data:
+                        verified_loc = f"{location_data['city']}, {location_data['state']} ({location})"
+                        print(f"[LOG] Quote ZIP Verified: {verified_loc}")
+                    else:
+                        print(f"[LOG] Quote ZIP Unverified: {location}")
+                    
+                    # 2. AI PRICING CALL
                     market_data = get_market_data(location, product_with_price)
                     
-                    # Try Gemini first, fall back to simple calculation
                     quote_data = None
-                    if gemini and gemini.initialized:
+                    if gemini and gemini.initialized and location_data:
                         try:
-                            print(f"Calculating quote with Gemini (base price: ${base_price:.2f})...")
+                            print(f"Calculating quote with Gemini for {verified_loc}...")
                             quote_data = gemini.calculate_quote(
                                 base_price, 
                                 market_data,
                                 product_name=product,
                                 width=width,
-                                location=location
+                                location=verified_loc
                             )
-                            print(f"Gemini quote: {quote_data}")
                         except Exception as e:
                             print(f"Gemini calculation failed: {str(e)}")
                             quote_data = None
                     
-                    # Fallback if Gemini failed
                     if not quote_data:
+                        # If AI fails or location is invalid, use standard markup but NO AI insights
                         quote_data = {
                             "selling_price": base_price * 1.3,
                             "margin": 30.0,
-                            "confidence": 0.5
+                            "confidence": 0.0
                         }
-                        print(f"Using fallback quote calculation: {quote_data}")
+                        print(f"Using standard pricing (No AI data available for {location})")
                     
-                    # Security: Sanitize AI data for non-admins immediately
                     if not is_admin:
                         quote_data.pop('suggested_retail_price', None)
                         quote_data.pop('suggested_dealer_price', None)
                     
-                    # Pricing Logic: Determine final selling price
                     ai_selling_price = quote_data["selling_price"]
                     standard_selling_price = base_price * 1.3
                     
@@ -706,8 +621,6 @@ def render_quote_page():
                     
                     total = round(selling_price * quantity, 2)
                     
-                    # Create quote with user_id and pending status
-                    # Create quote with user_id and pending status
                     user_id = st.session_state.get('user_id')
                     db.create_quote(
                         customer_name, location,
@@ -722,10 +635,8 @@ def render_quote_page():
                     
                     st.success("✓ Quote Submitted for Approval!")
                     
-                    is_admin = st.session_state.get('role') in ['admin', 'super_admin']
-                    
                     if is_admin:
-                        st.info("Your quote has been sent to the admin for review. You will be notified once it is approved.")
+                        st.info("Your quote has been sent to the admin for review.")
                         st.write("---")
                         
                         col1, col2, col3 = st.columns(3)
@@ -739,8 +650,6 @@ def render_quote_page():
                             if promo_active and discount_pct and discount_pct > 0:
                                 st.metric("Discount Applied", f"🎉 {discount_pct}%")
                                 st.caption(f"📌 {promo_name}")
-                                days_left = db.get_promotion_days_remaining(end_date)
-                                st.caption(f"⏰ {days_left} days left")
                             else:
                                 st.metric("Pricing", "✓ Standard Rate")
                         
@@ -748,64 +657,26 @@ def render_quote_page():
                             st.write(f"**Customer:** {customer_name}")
                             st.write(f"**Location:** {location}")
                             st.write(f"**Product:** {width} {product}")
-                            st.write(f"**Standard Price (per sqft):** {format_currency(standard_price)}")
-                            if promo_active and discount_pct and discount_pct > 0:
-                                discounted_price = standard_price * (1 - discount_pct / 100)
-                                st.write(f"**Applied Discount:** {discount_pct}% = {format_currency(discounted_price)}")
                             st.write(f"**Selling Price (per sqft):** {format_currency(selling_price)}")
-                            st.write(f"**Market Analysis:** {market_data.get('demand_indicator', 'N/A')}")
                             
-                            # Admin-only visibility for AI suggested prices
                             st.divider()
                             st.markdown("### 🤖 AI Market Pricing (Zip-Code Based)")
                             
                             with st.container(border=True):
                                 st.caption(f"📍 **Zip Code Used:** {location}")
-                                
                                 ac1, ac2 = st.columns(2)
                                 with ac1:
                                     if suggested_retail:
-                                        st.metric("Suggested Retail Price", format_currency(suggested_retail), help="Market rate for end consumers")
+                                        st.metric("Suggested Retail Price", format_currency(suggested_retail))
                                 with ac2:
                                     if suggested_dealer:
-                                        st.metric("Suggested Dealer Price", format_currency(suggested_dealer), help="Market rate for contractors/dealers")
-                                
-                                st.caption("📝 *Note: For reference only. Supplier pricing remains the source of truth.*")
-                            
-                            if matching_product:
-                                st.divider()
-                                st.subheader("💰 Promotion & Discount Details")
-                                
-                                volume_discounts = matching_product.get('volume_discounts')
-                                
-                                if discount_pct and discount_pct > 0:
-                                    col1, col2 = st.columns(2)
-                                    with col1:
-                                        st.write(f"**🎯 Discount Rate:** {discount_pct}%")
-                                        if promo_name:
-                                            st.write(f"**📌 Promotion:** {promo_name}")
-                                        if start_date and end_date:
-                                            days_left = db.get_promotion_days_remaining(end_date)
-                                            status_icon = "✅ ACTIVE" if promo_active else "⏱️ ENDED"
-                                            st.write(f"**📅 Status:** {status_icon}")
-                                            if promo_active:
-                                                st.write(f"**⏰ Days Remaining:** {days_left} days")
-                                            st.write(f"**Valid:** {start_date.split()[0]} to {end_date.split()[0]}")
-                                    with col2:
-                                        if volume_discounts:
-                                            st.write("**📦 Volume Discounts:**")
-                                            st.info(volume_discounts)
-                                else:
-                                    if volume_discounts:
-                                        st.info(f"📦 **Volume Discounts Available:** {volume_discounts}")
+                                        st.metric("Suggested Dealer Price", format_currency(suggested_dealer))
                     else:
-                        # Regular User View - STRICTLY LIMITED
                         st.info("ℹ️ Quote submitted for admin review")
-                        
                         uc1, uc2, uc3 = st.columns(3)
                         with uc1:
                             if suggested_retail:
-                                st.metric("Suggested Retail Price", format_currency(suggested_retail), help="AI-Suggested Market Price")
+                                st.metric("Suggested Retail Price", format_currency(suggested_retail))
                             else:
                                 st.metric("Suggested Retail Price", "Pending")
                         with uc2:
@@ -820,26 +691,10 @@ def render_quote_page():
 def render_analytics_page():
     st.header("📊 Analytics Dashboard")
     
-    # --- AI Market Pricing Lookup (Admin & Super Admin Only) ---
     user_id = st.session_state.get('user_id')
     is_admin = db.is_user_admin(user_id) if user_id else False
     
     if is_admin:
-        # --- DEBUG: List Models (Temporary) ---
-        if st.checkbox("🛠️ Debug: List Available AI Models"):
-            try:
-                import google.generativeai as genai
-                if GEMINI_API_KEY:
-                    genai.configure(api_key=GEMINI_API_KEY)
-                    models = genai.list_models()
-                    st.write("Available models for your API key:")
-                    for m in models:
-                        st.code(f"Name: {m.name}\nMethods: {m.supported_generation_methods}")
-                else:
-                    st.error("No API Key found for debug.")
-            except Exception as e:
-                st.error(f"Debug error: {str(e)}")
-        
         with st.container(border=True):
             st.subheader("🤖 AI Market Pricing Lookup")
             st.caption("On-demand market pricing analysis for any product and location.")
@@ -864,51 +719,68 @@ def render_analytics_page():
                     if not lookup_zip:
                         st.error("⚠️ Please enter a Zip Code to perform the lookup.")
                     else:
-                        with st.spinner(f"AI is analyzing market data for {selected_product} in {lookup_zip}..."):
-                            try:
-                                # Find the product to get its base cost
-                                matching_p = next((p for p in products_data if p['name'] == selected_product and p['width'] == selected_width), None)
-                                base_price = matching_p['standard_price'] if matching_p else 4.0
+                        # 1. ZIP CODE VALIDATION
+                        with st.status("📍 Validating location...", expanded=True) as status:
+                            location_data = validate_zip_code(lookup_zip)
+                            
+                            if not location_data:
+                                status.update(label="❌ Invalid ZIP code", state="error", expanded=False)
+                                st.error(f"Invalid ZIP code: '{lookup_zip}'. Please enter a valid 5-digit US ZIP code.")
+                                print(f"[LOG] ZIP Validation Failed: {lookup_zip}")
+                            else:
+                                city_state = f"{location_data['city']}, {location_data['state']}"
+                                status.update(label=f"✅ Location Verified: {city_state}", state="complete")
+                                st.toast(f"Verified: {city_state}")
+                                print(f"[LOG] ZIP Validation Passed: {lookup_zip} ({city_state})")
                                 
-                                product_with_price = {
-                                    "name": selected_product,
-                                    "width": selected_width,
-                                    "base_price": base_price
-                                }
-                                
-                                # Call AI logic
-                                market_data = get_market_data(lookup_zip, product_with_price)
-                                
-                                if gemini:
-                                    if gemini.initialized:
-                                        quote_data = gemini.calculate_quote(
-                                            base_price, 
-                                            market_data,
-                                            product_name=selected_product,
-                                            width=selected_width,
-                                            location=lookup_zip
-                                        )
+                                # 2. AI PRICING CALL
+                                with st.spinner(f"AI is analyzing market data for {selected_product} in {city_state}..."):
+                                    try:
+                                        matching_p = next((p for p in products_data if p['name'] == selected_product and p['width'] == selected_width), None)
+                                        base_price = matching_p['standard_price'] if matching_p else 4.0
                                         
-                                        if quote_data:
-                                            st.success("✅ AI Analysis Complete")
+                                        product_with_price = {
+                                            "name": selected_product,
+                                            "width": selected_width,
+                                            "base_price": base_price
+                                        }
+                                        
+                                        print(f"[LOG] Triggering AI call for {selected_product} in {lookup_zip}")
+                                        
+                                        market_data = get_market_data(lookup_zip, product_with_price)
+                                        
+                                        if gemini and gemini.initialized:
+                                            quote_data = gemini.calculate_quote(
+                                                base_price, 
+                                                market_data,
+                                                product_name=selected_product,
+                                                width=selected_width,
+                                                location=f"{city_state} ({lookup_zip})"
+                                            )
                                             
-                                            # Display Results
-                                            res_col1, res_col2 = st.columns(2)
-                                            with res_col1:
-                                                st.metric("Suggested Retail Price", f"${quote_data.get('suggested_retail_price', 0):.2f}", help="Market rate for end consumers")
-                                            with res_col2:
-                                                st.metric("Suggested Dealer Price", f"${quote_data.get('suggested_dealer_price', 0):.2f}", help="Market rate for contractors/dealers")
-                                            
-                                            st.info(f"📊 **Analysis Context:** {selected_product} ({selected_width}) in {lookup_zip} | Generated at {datetime.now().strftime('%H:%M:%S')}")
+                                            if quote_data and quote_data.get('selling_price'):
+                                                st.success(f"✅ Pricing based on verified location: {city_state}")
+                                                
+                                                res_col1, res_col2 = st.columns(2)
+                                                with res_col1:
+                                                    st.metric("Suggested Retail Price", f"${quote_data.get('suggested_retail_price', 0):.2f}")
+                                                with res_col2:
+                                                    st.metric("Suggested Dealer Price", f"${quote_data.get('suggested_dealer_price', 0):.2f}")
+                                                
+                                                if quote_data.get('analysis_summary'):
+                                                    with st.expander("📝 AI Analysis Details"):
+                                                        st.write(quote_data['analysis_summary'])
+                                                
+                                                st.info(f"📊 **Analysis Context:** {selected_product} ({selected_width}) in {city_state}")
+                                                print(f"[LOG] AI Call Successful for {lookup_zip}")
+                                            else:
+                                                st.error(f"Pricing unavailable for {city_state}. The AI could not find sufficient local market data.")
+                                                print(f"[LOG] AI Call Rejected/Failed for {lookup_zip}: No specific data")
                                         else:
-                                            st.error("AI could not generate pricing data. Please try again.")
-                                    else:
-                                        st.error(f"❌ Gemini AI initialization failed: {gemini.init_error}")
-                                        st.info("Please check your API key and internet connection.")
-                                else:
-                                    st.error("❌ Gemini API Key is missing. Please check your .env file.")
-                            except Exception as e:
-                                st.error(f"Error during AI lookup: {str(e)}")
+                                            st.error("AI service is not initialized.")
+                                    except Exception as e:
+                                        st.error(f"AI Error: {str(e)}")
+                                        print(f"[LOG] AI Error for {lookup_zip}: {str(e)}")
             else:
                 st.info("No product data available for lookup.")
         st.divider()
@@ -917,26 +789,20 @@ def render_analytics_page():
     
     with col1:
         st.subheader("Quote Statistics")
-        
-        # Check if user is admin for filtering
         user_id = st.session_state.get('user_id')
         is_admin = db.is_user_admin(user_id) if user_id else False
         
-        # Show filter indicator
         if is_admin:
             st.caption("👑 Admin view: Showing company-wide statistics")
         else:
             st.caption("👤 Personal view: Showing your quotes only")
         
         try:
-            # Fetch comprehensive analytics data
             analytics_data = db.get_analytics_data(user_id=user_id, is_admin=is_admin)
             
             if analytics_data:
-                # Process data into DataFrame
                 df = pd.DataFrame(analytics_data)
                 
-                # Extract wood type and width from product_specs JSON
                 def extract_specs(specs_str):
                     try:
                         specs = json.loads(specs_str)
@@ -945,21 +811,15 @@ def render_analytics_page():
                         return 'Unknown', 'Unknown'
 
                 df['wood_type'], df['width'] = zip(*df['product_specs'].map(extract_specs))
-                
-                # Ensure zip_code is available (fallback to location if missing)
                 df['zip_code'] = df['zip_code'].fillna(df['location'])
                 df['customer_type'] = df['customer_type'].fillna('Unknown').str.title()
                 
-                # --- Sorting Controls ---
                 st.markdown("### 🛠️ Filter & Sort")
-                sort_col, order_col = st.columns([2, 1])
-                with sort_col:
-                    sort_by = st.selectbox(
-                        "Sort Quotes By",
-                        ["Date (Newest First)", "Date (Oldest First)", "Customer Name", "Wood Type", "Zip Code", "Price (High to Low)"]
-                    )
+                sort_by = st.selectbox(
+                    "Sort Quotes By",
+                    ["Date (Newest First)", "Date (Oldest First)", "Customer Name", "Wood Type", "Zip Code", "Price (High to Low)"]
+                )
                 
-                # Apply sorting
                 if sort_by == "Date (Newest First)":
                     df = df.sort_values('created_at', ascending=False)
                 elif sort_by == "Date (Oldest First)":
@@ -973,51 +833,34 @@ def render_analytics_page():
                 elif sort_by == "Price (High to Low)":
                     df = df.sort_values('final_price', ascending=False)
                 
-                # --- Display Key Metrics ---
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Total Quotes", len(df))
                 m2.metric("Avg Quote Value", format_currency(df['final_price'].mean()))
                 m3.metric("Total Volume", f"{df['quantity'].sum():,} sqft")
                 
-                # --- Quote History Chart ---
                 if len(df) > 1:
                     st.markdown("### 📈 Quote History")
                     df['created_at'] = pd.to_datetime(df['created_at'])
                     chart_data = df.set_index('created_at')['final_price']
-                    st.line_chart(chart_data, width="stretch")
+                    st.line_chart(chart_data)
                 
-                # --- New Visualizations ---
                 st.divider()
                 st.subheader("📍 Pricing Insights")
-                
                 tab1, tab2 = st.tabs(["🗺️ Zip Code Analysis", "👥 Dealer vs Retail"])
                 
                 with tab1:
-                    st.markdown("**Average Price per SqFt by Zip Code**")
                     if 'zip_code' in df.columns and not df['zip_code'].isnull().all():
-                        # Calculate price per sqft for each quote first
                         df['price_per_sqft'] = df['final_price'] / df['quantity']
                         zip_stats = df.groupby('zip_code')['price_per_sqft'].mean().sort_values(ascending=False)
                         st.bar_chart(zip_stats)
-                    else:
-                        st.info("Insufficient zip code data for analysis.")
                         
                 with tab2:
-                    st.markdown("**Pricing Strategy: Dealer vs Retail**")
                     if 'customer_type' in df.columns:
-                        # Calculate price per sqft
                         if 'price_per_sqft' not in df.columns:
                             df['price_per_sqft'] = df['final_price'] / df['quantity']
-                        
                         type_stats = df.groupby('customer_type')['price_per_sqft'].mean()
                         st.bar_chart(type_stats, color="#ffaa00")
-                        
-                        # Show data table
-                        st.dataframe(type_stats.to_frame(name="Avg Price/SqFt").style.format("${:.2f}"), use_container_width=True)
-                    else:
-                        st.info("Insufficient customer type data.")
-
-                # --- Recent Quotes Table ---
+                
                 st.divider()
                 st.subheader("📋 Recent Quotes")
                 display_cols = ['customer_name', 'wood_type', 'zip_code', 'quantity', 'final_price', 'created_at']
@@ -1025,9 +868,8 @@ def render_analytics_page():
                 display_df.columns = ['Customer', 'Product', 'Zip/Location', 'Sq Ft', 'Total Price', 'Date']
                 display_df['Total Price'] = display_df['Total Price'].apply(format_currency)
                 st.dataframe(display_df, hide_index=True, use_container_width=True)
-                
             else:
-                st.info("ℹ️ No quotes generated yet. Create quotes to see statistics.")
+                st.info("ℹ️ No quotes generated yet.")
         except Exception as e:
             st.error(f"Error loading analytics: {str(e)}")
     
@@ -1038,8 +880,6 @@ def render_analytics_page():
             products_df = pd.DataFrame([
                 {
                     "Product": f"{p['name']} ({p['width']})",
-                    "Name": p['name'],
-                    "Width": p['width'],
                     "Price/sqft": p['cost_price'],
                     "Last Updated": pd.to_datetime(p['updated_at']).strftime('%Y-%m-%d') if p.get('updated_at') else 'N/A'
                 }
@@ -1047,25 +887,17 @@ def render_analytics_page():
             ])
             
             if not products_df.empty:
-                st.write("Current Product Prices")
-                
                 chart_data = products_df.set_index("Product")["Price/sqft"]
-                st.bar_chart(chart_data, width="stretch")
-                
-                display_df = products_df[["Name", "Width", "Price/sqft", "Last Updated"]].copy()
-                display_df["Price/sqft"] = display_df["Price/sqft"].apply(lambda x: f"${x:.2f}")
-                st.dataframe(display_df, hide_index=True, width="stretch")
+                st.bar_chart(chart_data)
+                st.dataframe(products_df, hide_index=True, use_container_width=True)
         else:
-            st.info("ℹ️ No product data available. Add products to see analytics.")
+            st.info("ℹ️ No product data available.")
     
     st.divider()
-    
-    # New comprehensive tables section
     st.subheader("🎯 Product Discount & Promotion Insights")
     
     products = db.get_products()
     if products:
-        # Prepare comprehensive product data with promotion details
         product_insights = []
         for p in products:
             discount_pct = p.get('discount_percentage', 0)
@@ -1074,33 +906,15 @@ def render_analytics_page():
             end_date = p.get('promotion_end_date')
             volume_discounts = p.get('volume_discounts')
             min_qty = p.get('min_qty_discount')
-            category = p.get('category', 'Standard')
             
-            # Classify tier
-            if discount_pct and discount_pct >= 15:
-                tier = "🏆 Premium+"
-            elif discount_pct and discount_pct >= 8:
-                tier = "⭐ Premium"
-            elif discount_pct and discount_pct >= 5:
-                tier = "💎 Mid-Tier"
-            elif discount_pct:
-                tier = "📦 Standard"
-            else:
-                tier = "💰 Budget"
-            
-            # Check promotion status
             if promotion_name and start_date and end_date:
                 is_active = db.is_promotion_active(start_date, end_date)
-                days_remaining = db.get_promotion_days_remaining(end_date)
-                promo_status = f"✅ Active ({days_remaining}d left)" if is_active else "⏱️ Expired"
+                promo_status = "✅ Active" if is_active else "⏱️ Expired"
             else:
                 promo_status = "None"
-                days_remaining = 0
             
             product_insights.append({
                 'Product': f"{p['name']} {p['width']}",
-                'Category': category,
-                'Tier': tier,
                 'Base Price': f"${p['cost_price']:.2f}",
                 'Standard Price': f"${p['standard_price']:.2f}",
                 'Discount %': f"{discount_pct}%" if discount_pct else "—",
@@ -1110,57 +924,22 @@ def render_analytics_page():
                 'Min Qty': f"{min_qty} sqft" if min_qty else "—"
             })
         
-        insights_df = pd.DataFrame(product_insights)
-        
-        # Display with styling
-        st.write("**Product Discount & Promotion Matrix**")
-        st.dataframe(insights_df, hide_index=True, width="stretch")
-        
-        # Summary statistics
-        st.write("**Key Business Insights**")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            active_promos = sum(1 for p in product_insights if "Active" in p['Promo Status'])
-            st.metric("Active Promotions", active_promos)
-        
-        with col2:
-            products_with_volume = sum(1 for p in product_insights if p['Volume Tiers'] == "Yes")
-            st.metric("Volume Discount Offerings", products_with_volume)
-        
-        with col3:
-            avg_discount = pd.to_numeric(insights_df['Discount %'].str.rstrip('%'), errors='coerce').mean()
-            st.metric("Avg Discount %", f"{avg_discount:.1f}%" if not pd.isna(avg_discount) else "N/A")
-        
-        with col4:
-            total_products = len(insights_df)
-            st.metric("Total Products", total_products)
-        
-        # Tier distribution
-        st.write("**Product Tier Distribution**")
-        tier_counts = pd.Series([p['Tier'] for p in product_insights]).value_counts()
-        st.bar_chart(tier_counts)
+        st.dataframe(pd.DataFrame(product_insights), hide_index=True, use_container_width=True)
     else:
-        st.info("ℹ️ No product data available. Add products to see comprehensive insights.")
+        st.info("ℹ️ No product data available.")
 
 # ===================== MAIN APP =====================
 def main():
     selected = render_sidebar()
     
     if selected == "🛡️ Admin Dashboard":
-        # Admin Dashboard - User Management & Quote Approvals
         if st.session_state.get('role') in ['admin', 'super_admin']:
             from admin_ui import render_admin_dashboard
-            # Pass email_handler if available, else None
             eh = email_handler if 'email_handler' in globals() else None
             render_admin_dashboard(db, eh)
         else:
             st.error("⛔ Access Denied: Admin privileges required.")
-    elif selected == "👥 User Management": # Backward compatibility or removal
-        # This block can be removed if "User Management" is no longer an option
-        pass
     elif selected == "📧 Supplier Management":
-        # Protect supplier management - admin only
         if require_admin():
             from supplier_ui import render_supplier_page
             render_supplier_page(db, email_handler, gemini)
@@ -1176,4 +955,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    st.info("Full system: Auto scrape + AI + CRM export")

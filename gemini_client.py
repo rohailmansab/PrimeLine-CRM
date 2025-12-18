@@ -15,14 +15,45 @@ class GeminiClient:
                 raise ValueError("Invalid API key format")
             
             genai.configure(api_key=api_key)
-            # Using gemini-pro for maximum compatibility across API versions
-            self.model = genai.GenerativeModel('gemini-pro')
             
-            # Test the connection
-            test_response = self.model.generate_content("Hello")
-            if test_response:
-                self.initialized = True
-                print(f"[OK] Successfully initialized gemini-pro")
+            # Try to find an available model dynamically
+            available_models = []
+            try:
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        # Normalize model name
+                        name = m.name.replace('models/', '')
+                        available_models.append(name)
+            except Exception as list_err:
+                print(f"Warning: Could not list models: {list_err}")
+            
+            # Fallback list if dynamic listing failed or returned nothing
+            fallbacks = ["gemini-1.5-flash", "gemini-pro", "gemini-1.0-pro"]
+            # Combine and remove duplicates while preserving order
+            models_to_try = []
+            for m in available_models + fallbacks:
+                if m not in models_to_try:
+                    models_to_try.append(m)
+            
+            last_err = None
+            for model_name in models_to_try:
+                try:
+                    print(f"Attempting to initialize with model: {model_name}")
+                    temp_model = genai.GenerativeModel(model_name)
+                    # Test the connection with a very simple prompt
+                    test_response = temp_model.generate_content("Hi", generation_config={"max_output_tokens": 5})
+                    if test_response:
+                        self.model = temp_model
+                        self.initialized = True
+                        print(f"[OK] Successfully initialized {model_name}")
+                        return
+                except Exception as e:
+                    last_err = str(e)
+                    print(f"Failed to initialize {model_name}: {last_err}")
+            
+            if not self.initialized:
+                raise Exception(f"Could not initialize any Gemini model. Last error: {last_err}")
+                
         except Exception as e:
             self.init_error = str(e)
             print(f"[ERROR] Gemini initialization error: {self.init_error}")

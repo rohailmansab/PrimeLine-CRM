@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Index, Text
+from sqlalchemy import Column, String, Boolean, DateTime, Index, Text, Integer
 from sqlalchemy.dialects.sqlite import BLOB
 from sqlalchemy.types import TypeDecorator, CHAR
 import uuid

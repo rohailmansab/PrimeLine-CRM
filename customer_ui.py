@@ -277,7 +277,7 @@ def render_customer_page():
             # Notes with truncation
             notes_display = c.notes if c.notes else "-"
             if len(notes_display) > 30:
-                cols[5].write(notes_display[:30] + "...", help=notes_display)
+                cols[5].markdown(notes_display[:30] + "...", help=notes_display)
             else:
                 cols[5].write(notes_display)
             

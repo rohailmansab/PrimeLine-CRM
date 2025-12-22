@@ -179,6 +179,31 @@ class Database:
                 conn.commit()
                 print("✓ Backfilled status column for existing quotes")
             
+            # Migration: Add AI pricing columns to quotes table
+            try:
+                c.execute("SELECT ai_retail_price FROM quotes LIMIT 1")
+            except:
+                c.execute("ALTER TABLE quotes ADD COLUMN ai_retail_price REAL")
+                print("✓ Added ai_retail_price column to quotes table")
+            
+            try:
+                c.execute("SELECT ai_dealer_price FROM quotes LIMIT 1")
+            except:
+                c.execute("ALTER TABLE quotes ADD COLUMN ai_dealer_price REAL")
+                print("✓ Added ai_dealer_price column to quotes table")
+            
+            try:
+                c.execute("SELECT ai_zip_code FROM quotes LIMIT 1")
+            except:
+                c.execute("ALTER TABLE quotes ADD COLUMN ai_zip_code TEXT")
+                print("✓ Added ai_zip_code column to quotes table")
+            
+            try:
+                c.execute("SELECT ai_generated_at FROM quotes LIMIT 1")
+            except:
+                c.execute("ALTER TABLE quotes ADD COLUMN ai_generated_at TIMESTAMP")
+                print("✓ Added ai_generated_at column to quotes table")
+            
             # Migration: Add business_name column to customers table
             try:
                 c.execute("SELECT business_name FROM customers LIMIT 1")
@@ -357,6 +382,145 @@ class Database:
         finally:
             conn.close()
 
+    def get_products_by_supplier(self, supplier_id: int):
+        """Get all products from a specific supplier"""
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            c.execute('''SELECT p.id, p.name, p.width, p.description, p.category, 
+                                p.cost_price, p.standard_price, p.discount_percentage, 
+                                p.min_qty_discount, p.promotion_name, p.volume_discounts, 
+                                p.updated_at
+                        FROM products p
+                        WHERE p.supplier_id = ?
+                        ORDER BY p.name, p.width''', (supplier_id,))
+            return [dict(row) for row in c.fetchall()]
+        finally:
+            conn.close()
+
+    def bulk_import_products(self, products_data: list, supplier_id: int = None, user_id: int = None) -> dict:
+        """
+        Bulk import products - update existing or insert new ones.
+        Returns dict with results: {updated: int, inserted: int, errors: list}
+        """
+        results = {
+            "updated": 0,
+            "inserted": 0,
+            "errors": [],
+            "skipped": 0
+        }
+        
+        conn = self.get_connection()
+        try:
+            c = conn.cursor()
+            
+            for idx, product in enumerate(products_data):
+                try:
+                    name = product.get('name')
+                    width = product.get('width')
+                    standard_price = product.get('standard_price')
+                    
+                    if not name or not width or not standard_price:
+                        results["errors"].append({
+                            "row": idx + 1,
+                            "product": name or "Unknown",
+                            "error": "Missing required fields (name, width, or price)"
+                        })
+                        results["skipped"] += 1
+                        continue
+                    
+                    # Check if product exists
+                    c.execute("SELECT id FROM products WHERE name = ? AND width = ?", (name, width))
+                    existing = c.fetchone()
+                    
+                    if existing:
+                        # Update existing product
+                        update_fields = ["standard_price = ?"]
+                        params = [standard_price]
+                        
+                        if 'cost_price' in product:
+                            update_fields.append("cost_price = ?")
+                            params.append(product['cost_price'])
+                        
+                        if 'description' in product:
+                            update_fields.append("description = ?")
+                            params.append(product['description'])
+                        
+                        if 'category' in product:
+                            update_fields.append("category = ?")
+                            params.append(product['category'])
+                        
+                        if 'discount_percentage' in product:
+                            update_fields.append("discount_percentage = ?")
+                            params.append(product['discount_percentage'])
+                        
+                        if 'min_qty_discount' in product:
+                            update_fields.append("min_qty_discount = ?")
+                            params.append(product['min_qty_discount'])
+                        
+                        if 'promotion_name' in product:
+                            update_fields.append("promotion_name = ?")
+                            params.append(product['promotion_name'])
+                        
+                        if 'volume_discounts' in product:
+                            update_fields.append("volume_discounts = ?")
+                            params.append(product['volume_discounts'])
+                        
+                        if supplier_id:
+                            update_fields.append("supplier_id = ?")
+                            params.append(supplier_id)
+                        
+                        update_fields.append("updated_at = CURRENT_TIMESTAMP")
+                        params.extend([name, width])
+                        
+                        query = f"UPDATE products SET {', '.join(update_fields)} WHERE name = ? AND width = ?"
+                        c.execute(query, params)
+                        results["updated"] += 1
+                    else:
+                        # Insert new product
+                        c.execute('''INSERT INTO products 
+                                    (name, width, description, category, cost_price, standard_price,
+                                     min_qty_discount, discount_percentage, promotion_name, volume_discounts, supplier_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                 (name, width,
+                                  product.get('description'),
+                                  product.get('category', 'Hardwood'),
+                                  product.get('cost_price', 0.0),
+                                  standard_price,
+                                  product.get('min_qty_discount'),
+                                  product.get('discount_percentage'),
+                                  product.get('promotion_name'),
+                                  product.get('volume_discounts'),
+                                  supplier_id))
+                        results["inserted"] += 1
+                        
+                except Exception as e:
+                    results["errors"].append({
+                        "row": idx + 1,
+                        "product": product.get('name', 'Unknown'),
+                        "error": str(e)
+                    })
+                    results["skipped"] += 1
+            
+            conn.commit()
+            
+            # Log the import
+            if user_id:
+                self.log_sync_event(
+                    "bulk_import",
+                    "success",
+                    f"Imported {results['inserted']} new, updated {results['updated']}, skipped {results['skipped']} products",
+                    supplier_id
+                )
+            
+        except Exception as e:
+            conn.rollback()
+            results["errors"].append({"error": f"Database error: {str(e)}"})
+        finally:
+            conn.close()
+        
+        return results
+
     def get_active_suppliers_count(self) -> int:
         """Get count of active suppliers"""
         conn = self.get_connection()
@@ -415,7 +579,7 @@ class Database:
             conn.close()
 
     def add_product(self, name: str, width: str, description: str = None, 
-                   category: str = "Hardwood", cost_price: float = 0.0,
+                   category: str = "Hardwood – Solid", cost_price: float = 0.0,
                    standard_price: float = 0.0, min_qty_discount: int = None,
                    discount_percentage: float = None, discount_type: str = None,
                    promotion_name: str = None, promotion_start_date: str = None,
@@ -604,9 +768,13 @@ class Database:
                     q.created_at,
                     c.zip_code,
                     c.customer_type,
-                    c.business_name
+                    c.business_name,
+                    p.category as product_category
                 FROM quotes q
                 LEFT JOIN customers c ON q.customer_name = c.business_name OR q.customer_name = c.full_name
+                LEFT JOIN products p ON 
+                    json_extract(q.product_specs, '$.product') = p.name AND 
+                    json_extract(q.product_specs, '$.width') = p.width
             '''
             
             params = []
@@ -659,35 +827,41 @@ class Database:
             # Comprehensive mock data covering all important cases
             sample_products = [
                 # Hardwood - Premium with multi-tier volume discounts
-                ("White Oak", '5"', "Premium grade white oak flooring - prefinished", "Hardwood", 4.25, 4.50, 500, 10.0, "bulk", "Fall Sale 2025", "2025-11-01", "2025-11-30", "500-999 sqft: 5% off, 1000-1499 sqft: 8% off, 1500+ sqft: 10% off"),
-                ("White Oak", '7"', "Wide plank white oak flooring - luxury grade", "Hardwood", 4.75, 5.00, 300, 12.0, "bulk", "Premium Wide Plank Special", "2025-11-15", "2025-12-15", "300-799 sqft: 7% off, 800-1199 sqft: 10% off, 1200+ sqft: 12% off"),
+                ("White Oak", '5"', "Premium grade white oak flooring - prefinished", "Hardwood – Solid", 4.25, 4.50, 500, 10.0, "bulk", "Fall Sale 2025", "2025-11-01", "2025-11-30", "500-999 sqft: 5% off, 1000-1499 sqft: 8% off, 1500+ sqft: 10% off"),
+                ("White Oak", '7"', "Wide plank white oak flooring - luxury grade", "Hardwood – Solid", 4.75, 5.00, 300, 12.0, "bulk", "Premium Wide Plank Special", "2025-11-15", "2025-12-15", "300-799 sqft: 7% off, 800-1199 sqft: 10% off, 1200+ sqft: 12% off"),
                 
                 # Hardwood - No promotion (edge case: NULL promotion)
-                ("Red Oak", '5"', "Traditional red oak flooring - natural finish", "Hardwood", 3.85, 4.10, None, None, None, None, None, None, None),
+                ("Red Oak", '5"', "Traditional red oak flooring - natural finish", "Hardwood – Solid", 3.85, 4.10, None, None, None, None, None, None, None),
                 
                 # Hardwood - Long promotion period with contractor discount
-                ("Red Oak", '7"', "Classic red oak planks - hand-scraped texture", "Hardwood", 4.15, 4.40, 400, 8.0, "bulk", "Contractor Discount", "2025-11-01", "2026-01-31", "400-799 sqft: 5% off, 800-1199 sqft: 6% off, 1200+ sqft: 8% off"),
+                ("Red Oak", '7"', "Classic red oak planks - hand-scraped texture", "Hardwood – Solid", 4.15, 4.40, 400, 8.0, "bulk", "Contractor Discount", "2025-11-01", "2026-01-31", "400-799 sqft: 5% off, 800-1199 sqft: 6% off, 1200+ sqft: 8% off"),
                 
                 # Premium Wood - No minimum quantity discount (edge case)
-                ("Maple", '4"', "Select grade maple flooring - Canadian sourced", "Hardwood", 4.50, 4.85, None, None, None, None, None, None, None),
+                ("Maple", '4"', "Select grade maple flooring - Canadian sourced", "Hardwood – Engineered", 4.50, 4.85, None, None, None, None, None, None, None),
                 
                 # Premium Wood - High discount percentage (tiered pricing)
-                ("Maple", '6"', "Wide plank maple flooring - engineered core", "Hardwood", 4.95, 5.25, 250, 15.0, "bulk", "Holiday Bundle Deal", "2025-12-01", "2025-12-31", "250-599 sqft: 8% off, 600-999 sqft: 12% off, 1000+ sqft: 15% off"),
+                ("Maple", '6"', "Wide plank maple flooring - engineered core", "Hardwood – Engineered", 4.95, 5.25, 250, 15.0, "bulk", "Holiday Bundle Deal", "2025-12-01", "2025-12-31", "250-599 sqft: 8% off, 600-999 sqft: 12% off, 1000+ sqft: 15% off"),
                 
                 # Luxury - Ultra-premium with aggressive discounts
-                ("Walnut", '5"', "Premium walnut flooring - exotic grade", "Hardwood", 5.95, 6.50, 200, 18.0, "bulk", "Luxury Flooring Promotion", "2025-11-20", "2025-12-20", "200-399 sqft: 10% off, 400-599 sqft: 14% off, 600+ sqft: 18% off"),
+                ("Walnut", '5"', "Premium walnut flooring - exotic grade", "Hardwood – Solid", 5.95, 6.50, 200, 18.0, "bulk", "Luxury Flooring Promotion", "2025-11-20", "2025-12-20", "200-399 sqft: 10% off, 400-599 sqft: 14% off, 600+ sqft: 18% off"),
                 
                 # Luxury - Exclusive with high minimums
-                ("Walnut", '7"', "Luxury wide plank walnut - hand-selected", "Hardwood", 6.75, 7.25, 150, 20.0, "bulk", "Exclusive Offer", "2025-11-01", "2025-11-30", "150-299 sqft: 12% off, 300-499 sqft: 16% off, 500+ sqft: 20% off"),
+                ("Walnut", '7"', "Luxury wide plank walnut - hand-selected", "Hardwood – Solid", 6.75, 7.25, 150, 20.0, "bulk", "Exclusive Offer", "2025-11-01", "2025-11-30", "150-299 sqft: 12% off, 300-499 sqft: 16% off, 500+ sqft: 20% off"),
                 
                 # Eco-Friendly - Sustainability focus with moderate discounts
-                ("Bamboo", '5"', "Sustainable bamboo flooring - LEED eligible", "Eco", 3.95, 4.25, 600, 7.0, "bulk", "Eco-Friendly Initiative", "2025-11-01", "2025-12-31", "600-999 sqft: 4% off, 1000-1499 sqft: 5% off, 1500+ sqft: 7% off"),
+                ("Bamboo", '5"', "Sustainable bamboo flooring - LEED eligible", "Hardwood – Engineered", 3.95, 4.25, 600, 7.0, "bulk", "Eco-Friendly Initiative", "2025-11-01", "2025-12-31", "600-999 sqft: 4% off, 1000-1499 sqft: 5% off, 1500+ sqft: 7% off"),
                 
                 # Eco-Friendly - Long campaign with high minimums
-                ("Cork", '6"', "Natural cork planks - renewable resource", "Eco", 3.85, 4.15, 700, 9.0, "bulk", "Green Building Special", "2025-10-15", "2026-01-15", "700-999 sqft: 5% off, 1000-1499 sqft: 7% off, 1500+ sqft: 9% off"),
+                ("Cork", '6"', "Natural cork planks - renewable resource", "Hardwood – Engineered", 3.85, 4.15, 700, 9.0, "bulk", "Green Building Special", "2025-10-15", "2026-01-15", "700-999 sqft: 5% off, 1000-1499 sqft: 7% off, 1500+ sqft: 9% off"),
                 
+                # New Products
+                ("Hickory", '5"', "Durable hickory flooring - high shock resistance", "Hardwood – Solid", 4.75, 5.10, 400, 10.0, "bulk", "Winter Hardwood Sale", "2025-12-01", "2026-02-28", "400-799 sqft: 5% off, 800+ sqft: 10% off"),
+                ("Hickory", '7"', "Wide plank hickory - rustic character", "Hardwood – Solid", 5.25, 5.60, 300, 12.0, "bulk", "Winter Hardwood Sale", "2025-12-01", "2026-02-28", "300-699 sqft: 6% off, 700+ sqft: 12% off"),
+                ("E-Thermawood", '5"', "Thermally treated wood - enhanced stability", "Hardwood – Engineered", 5.25, 5.75, 250, 15.0, "bulk", "Eco-Premium Launch", "2025-12-15", "2026-03-15", "250-499 sqft: 8% off, 500+ sqft: 15% off"),
+                ("E-Thermawood", '6"', "Wide plank E-Thermawood - modern aesthetic", "Hardwood – Engineered", 5.75, 6.25, 200, 18.0, "bulk", "Eco-Premium Launch", "2025-12-15", "2026-03-15", "200-399 sqft: 10% off, 400+ sqft: 18% off"),
+
                 # Budget Option - No discount (edge case: low-end pricing)
-                ("Laminate", '4"', "Commercial grade laminate - high durability", "Budget", 1.95, 2.15, None, None, None, None, None, None, None),
+                ("LVP Flooring", '7"', "Commercial grade LVP - high durability", "LVP Flooring", 1.95, 2.15, None, None, None, None, None, None, None),
             ]
             
             sample_suppliers = [

@@ -55,13 +55,22 @@ THEME = {
     "font": "sans serif"
 }
 
+PRODUCT_CATEGORIES = [
+    "Hardwood – Solid",
+    "Hardwood – Engineered",
+    "Hardwood – Reclaimed",
+    "LVP Flooring"
+]
+
 SAMPLE_PRODUCTS = [
-    {"name": "White Oak", "widths": ["5\"", "7\""], "base_price": 4.25},
-    {"name": "Red Oak", "widths": ["5\"", "7\""], "base_price": 3.85},
-    {"name": "Maple", "widths": ["4\"", "6\""], "base_price": 4.50},
-    {"name": "Walnut", "widths": ["5\"", "7\""], "base_price": 5.95},
-    {"name": "Bamboo", "widths": ["5\""], "base_price": 3.95},
-    {"name": "Cork", "widths": ["6\""], "base_price": 3.85}
+    {"name": "White Oak", "widths": ["5\"", "7\""], "base_price": 4.25, "category": "Hardwood – Solid"},
+    {"name": "Red Oak", "widths": ["5\"", "7\""], "base_price": 3.85, "category": "Hardwood – Solid"},
+    {"name": "Maple", "widths": ["4\"", "6\""], "base_price": 4.50, "category": "Hardwood – Engineered"},
+    {"name": "Walnut", "widths": ["5\"", "7\""], "base_price": 5.95, "category": "Hardwood – Solid"},
+    {"name": "Bamboo", "widths": ["5\""], "base_price": 3.95, "category": "Hardwood – Engineered"},
+    {"name": "Cork", "widths": ["6\""], "base_price": 3.85, "category": "Hardwood – Engineered"},
+    {"name": "Hickory", "widths": ["5\"", "7\""], "base_price": 4.75, "category": "Hardwood – Solid"},
+    {"name": "E-Thermawood", "widths": ["5\"", "6\""], "base_price": 5.25, "category": "Hardwood – Engineered"}
 ]
 
 SAMPLE_SUPPLIERS = [
@@ -83,3 +92,5 @@ SCHEDULER_CONFIG = {
     "daily_check_time": "14:00",    # UTC
     "timezone": "UTC"
 }
+
+SUPPORTED_WIDTHS = ["2.5\"", "3.5\"", "4\"", "5\"", "6\"", "7\"", "8\"", "10\"", "11\"", "12\"", "13\"", "14\"", "Custom"]

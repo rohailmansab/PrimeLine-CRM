@@ -14,10 +14,10 @@ from gemini_client import GeminiClient
 from email_handler import EmailHandler
 from auth_ui import render_authentication_gate
 from customer_ui import render_customer_page
-from utils import validate_zip_code
+from utils import validate_zip_code, validate_width, parse_volume_discounts
 from config import (
     GEMINI_API_KEY, DATABASE_PATH, EMAIL_TEMPLATES,
-    THEME, SAMPLE_PRODUCTS, SAMPLE_SUPPLIERS
+    THEME, SAMPLE_PRODUCTS, SAMPLE_SUPPLIERS, SUPPORTED_WIDTHS
 )
 
 # ===================== UI SETUP =====================
@@ -474,11 +474,16 @@ def render_quote_page():
             st.error(f"No widths found for {product}")
             return
         
-        width = st.selectbox(
+        width_option = st.selectbox(
             "Width",
-            options=product_widths,
+            options=SUPPORTED_WIDTHS,
             key="width_select"
         )
+        
+        width = width_option
+        if width_option == "Custom":
+            width = st.text_input("Enter Custom Width", placeholder="e.g. 9\"", key="custom_width_input")
+            width = validate_width(width)
         
         from repositories.customer_repository import CustomerRepository
         from models.base import SessionLocal
@@ -509,13 +514,13 @@ def render_quote_page():
         if selected_customer_key != "New Customer":
             selected_customer = customer_options[selected_customer_key]
             default_name = selected_customer.full_name
-            if selected_customer.location:
-                default_location = selected_customer.location
+            if selected_customer.zip_code:
+                default_location = selected_customer.zip_code
         
         with st.form("quote_form"):
             customer_name = st.text_input("Customer Name", value=default_name, placeholder="Enter customer name")
-            location = st.text_input("Location", value=default_location)
-            quantity = st.number_input("Square Feet", 100, 10000, 1000)
+            location = st.text_input("ZIP Code", value=default_location)
+            quantity = st.number_input("Square Feet", 100, 100000, 1000)
             
             use_ai_reference = True
             is_admin = st.session_state.get('role') in ['admin', 'super_admin']
@@ -555,6 +560,17 @@ def render_quote_page():
                     else:
                         base_price = standard_price if standard_price > 0 else cost_price
                     
+                    # Apply volume discount if available
+                    volume_discount_pct = parse_volume_discounts(matching_product.get('volume_discounts'), quantity)
+                    if volume_discount_pct > 0:
+                        volume_price = standard_price * (1 - volume_discount_pct / 100)
+                        # If volume discount is better than current base_price, use it
+                        if volume_price < base_price:
+                            base_price = volume_price
+                            promo_active = True
+                            promo_name = f"Volume Discount ({volume_discount_pct}%)"
+                            discount_pct = volume_discount_pct
+                    
                     if base_price <= 0:
                         st.error(f"Invalid price data for {product} {width}")
                         return
@@ -565,21 +581,15 @@ def render_quote_page():
                         "base_price": base_price
                     }
                     
-                    # 1. ZIP CODE VALIDATION
-                    location_data = validate_zip_code(location)
-                    verified_loc = location
-                    
-                    if location_data:
-                        verified_loc = f"{location_data['city']}, {location_data['state']} ({location})"
-                        print(f"[LOG] Quote ZIP Verified: {verified_loc}")
-                    else:
-                        print(f"[LOG] Quote ZIP Unverified: {location}")
+                    # 1. ZIP CODE VALIDATION (Optional, but keeping it for sanity check)
+                    verified_loc = location.strip()
+                    print(f"[LOG] Quote ZIP: {verified_loc}")
                     
                     # 2. AI PRICING CALL
-                    market_data = get_market_data(location, product_with_price)
+                    market_data = get_market_data(verified_loc, product_with_price)
                     
                     quote_data = None
-                    if gemini and gemini.initialized and location_data:
+                    if gemini and gemini.initialized:
                         try:
                             print(f"Calculating quote with Gemini for {verified_loc}...")
                             quote_data = gemini.calculate_quote(
@@ -707,8 +717,10 @@ def render_analytics_page():
                     selected_product = st.selectbox("Select Product", options=product_names, key="lookup_product")
                 
                 with lcol2:
-                    available_widths = sorted(list(set(p['width'] for p in products_data if p['name'] == selected_product)))
-                    selected_width = st.selectbox("Select Width", options=available_widths, key="lookup_width")
+                    selected_width = st.selectbox("Select Width", options=SUPPORTED_WIDTHS, key="lookup_width")
+                    if selected_width == "Custom":
+                        selected_width = st.text_input("Enter Custom Width", placeholder="e.g. 9\"", key="lookup_custom_width")
+                        selected_width = validate_width(selected_width)
                 
                 with lcol3:
                     lookup_zip = st.text_input("Zip Code", placeholder="e.g. 90210", key="lookup_zip")
@@ -717,22 +729,15 @@ def render_analytics_page():
                     if not lookup_zip:
                         st.error("⚠️ Please enter a Zip Code to perform the lookup.")
                     else:
-                        # 1. ZIP CODE VALIDATION
-                        with st.status("📍 Validating location...", expanded=True) as status:
-                            location_data = validate_zip_code(lookup_zip)
+                        # 1. ZIP CODE VALIDATION (Optional sanity check)
+                        with st.status("📍 Processing ZIP code...", expanded=True) as status:
+                            verified_loc = lookup_zip.strip()
+                            status.update(label=f"✅ ZIP Code: {verified_loc}", state="complete")
+                            st.toast(f"ZIP: {verified_loc}")
+                            print(f"[LOG] ZIP Processing: {verified_loc}")
                             
-                            if not location_data:
-                                status.update(label="❌ Invalid ZIP code", state="error", expanded=False)
-                                st.error(f"Invalid ZIP code: '{lookup_zip}'. Please enter a valid 5-digit US ZIP code.")
-                                print(f"[LOG] ZIP Validation Failed: {lookup_zip}")
-                            else:
-                                city_state = f"{location_data['city']}, {location_data['state']}"
-                                status.update(label=f"✅ Location Verified: {city_state}", state="complete")
-                                st.toast(f"Verified: {city_state}")
-                                print(f"[LOG] ZIP Validation Passed: {lookup_zip} ({city_state})")
-                                
-                                # 2. AI PRICING CALL
-                                with st.spinner(f"AI is analyzing market data for {selected_product} in {city_state}..."):
+                            # 2. AI PRICING CALL
+                            with st.spinner(f"AI is analyzing market data for {selected_product} in {verified_loc}..."):
                                     try:
                                         matching_p = next((p for p in products_data if p['name'] == selected_product and p['width'] == selected_width), None)
                                         base_price = matching_p['standard_price'] if matching_p else 4.0
@@ -753,11 +758,11 @@ def render_analytics_page():
                                                 market_data,
                                                 product_name=selected_product,
                                                 width=selected_width,
-                                                location=f"{city_state} ({lookup_zip})"
+                                                location=verified_loc
                                             )
                                             
                                             if quote_data and quote_data.get('selling_price'):
-                                                st.success(f"✅ Pricing based on verified location: {city_state}")
+                                                st.success(f"✅ Pricing based on ZIP: {verified_loc}")
                                                 
                                                 res_col1, res_col2 = st.columns(2)
                                                 with res_col1:
@@ -769,10 +774,10 @@ def render_analytics_page():
                                                     with st.expander("📝 AI Analysis Details"):
                                                         st.write(quote_data['analysis_summary'])
                                                 
-                                                st.info(f"📊 **Analysis Context:** {selected_product} ({selected_width}) in {city_state}")
+                                                st.info(f"📊 **Analysis Context:** {selected_product} ({selected_width}) in {verified_loc}")
                                                 print(f"[LOG] AI Call Successful for {lookup_zip}")
                                             else:
-                                                st.error(f"Pricing unavailable for {city_state}. The AI could not find sufficient local market data.")
+                                                st.error(f"Pricing unavailable for {verified_loc}. The AI could not find sufficient local market data.")
                                                 print(f"[LOG] AI Call Rejected/Failed for {lookup_zip}: No specific data")
                                         else:
                                             st.error("AI service is not initialized.")
@@ -841,6 +846,24 @@ def render_analytics_page():
                     df['created_at'] = pd.to_datetime(df['created_at'])
                     chart_data = df.set_index('created_at')['final_price']
                     st.line_chart(chart_data)
+                
+                st.divider()
+                
+                # Charts Row
+                chart_col1, chart_col2 = st.columns(2)
+                
+                with chart_col1:
+                    st.subheader("Quotes by Product Category")
+                    if 'product_category' in df.columns:
+                        category_counts = df['product_category'].fillna('Uncategorized').value_counts()
+                        st.bar_chart(category_counts)
+                    else:
+                        st.info("No category data available yet.")
+                    
+                with chart_col2:
+                    st.subheader("Quotes by Wood Type")
+                    wood_counts = df['wood_type'].value_counts()
+                    st.bar_chart(wood_counts)
                 
                 st.divider()
                 st.subheader("📍 Pricing Insights")

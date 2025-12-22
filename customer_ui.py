@@ -62,9 +62,21 @@ def add_customer_dialog():
                     customer_type=customer_type,
                     notes=notes
                 )
-                # Associate customer with logged-in user
+                
+                # Check if user is admin
+                from database import Database
+                from config import DATABASE_PATH
+                db_instance = Database(DATABASE_PATH)
                 user_id = int(st.session_state.user_id) if 'user_id' in st.session_state else None
-                repo.create(new_customer, user_id=user_id)
+                is_admin = db_instance.is_user_admin(user_id) if user_id else False
+                
+                # Admin-created customers default to UNASSIGNED
+                # Regular users' customers are assigned to themselves
+                if is_admin:
+                    repo.create(new_customer, user_id=None)
+                else:
+                    repo.create(new_customer, user_id=user_id)
+                    
                 st.session_state.refresh_key = time.time() # Trigger refresh
                 st.rerun()
             except Exception as e:

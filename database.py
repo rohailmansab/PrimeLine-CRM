@@ -890,6 +890,58 @@ class Database:
                 
             for supplier in sample_suppliers:
                 self.add_supplier(*supplier)
+            
+            # Automatically add all supported widths for each product
+            print("Adding all width variants for products...")
+            SUPPORTED_WIDTHS = ["2.5\"", "3.5\"", "4\"", "5\"", "6\"", "7\"", "8\"", "10\"", "11\"", "12\"", "13\"", "14\""]
+            
+            conn = self.get_connection()
+            try:
+                c = conn.cursor()
+                
+                # Get all unique products (by name)
+                c.execute("SELECT DISTINCT name FROM products ORDER BY name")
+                products = [row['name'] for row in c.fetchall()]
+                
+                added_count = 0
+                for product_name in products:
+                    # Get a template product to copy attributes from
+                    c.execute("SELECT * FROM products WHERE name = ? LIMIT 1", (product_name,))
+                    template = dict(c.fetchone())
+                    
+                    for width in SUPPORTED_WIDTHS:
+                        # Check if this product-width combination exists
+                        c.execute("SELECT id FROM products WHERE name = ? AND width = ?", (product_name, width))
+                        if c.fetchone() is None:
+                            # Add this width for this product
+                            c.execute("""
+                                INSERT INTO products (
+                                    name, width, description, category, cost_price, standard_price,
+                                    min_qty_discount, discount_percentage, discount_type,
+                                    promotion_name, promotion_start_date, promotion_end_date,
+                                    volume_discounts
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                product_name,
+                                width,
+                                template.get('description', f"{product_name} flooring - {width} width"),
+                                template.get('category', 'Hardwood'),
+                                template.get('cost_price', 4.0),
+                                template.get('standard_price', 4.5),
+                                template.get('min_qty_discount'),
+                                template.get('discount_percentage'),
+                                template.get('discount_type'),
+                                template.get('promotion_name'),
+                                template.get('promotion_start_date'),
+                                template.get('promotion_end_date'),
+                                template.get('volume_discounts')
+                            ))
+                            added_count += 1
+                
+                conn.commit()
+                print(f"✅ Added {added_count} width variants. Total products: {len(products) * len(SUPPORTED_WIDTHS)}")
+            finally:
+                conn.close()
                     
             return True
             

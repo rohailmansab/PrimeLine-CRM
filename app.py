@@ -59,6 +59,10 @@ try:
     if product_count == 0:
         db.populate_sample_data()
         st.toast("💫 Sample data loaded for demo!")
+    else:
+        # Ensure all width variants exist for existing databases
+        from add_all_widths import ensure_all_widths
+        ensure_all_widths(db)
     conn.close()
 except Exception as e:
     st.error(f"Database initialization error: {str(e)}")

@@ -464,30 +464,37 @@ def render_quote_page():
         if 'selected_width' not in st.session_state:
             st.session_state.selected_width = None
         
-        product_names = sorted(set(p["name"] for p in products))
-        product = st.selectbox(
-            "Product",
-            options=product_names,
-            key="product_select",
-            on_change=lambda: st.session_state.update({"selected_width": None})
+        # Wood Type Dropdown
+        wood_type = st.selectbox(
+            "Type of Wood *",
+            options=[
+                "White Oak", "Red Oak", "Maple", "Hickory", "Bamboo",
+                "Red Cedar", "Walnut", "American Cherry", "Yellow Birch",
+                "Ash", "European Oak"
+            ],
+            help="Select the wood type for your flooring",
+            key="wood_type_select"
         )
         
-        product_widths = sorted(set(p["width"] for p in products if p["name"] == product))
-        
-        if not product_widths:
-            st.error(f"No widths found for {product}")
-            return
-        
-        width_option = st.selectbox(
-            "Width",
-            options=SUPPORTED_WIDTHS,
-            key="width_select"
+        # Floor Type Dropdown
+        floor_type = st.selectbox(
+            "Floor Type *",
+            options=["Solid", "Engineered", "Reclaimed", "Thermawood"],
+            help="Select the type of flooring construction",
+            key="floor_type_select"
         )
         
-        width = width_option
-        if width_option == "Custom":
-            width = st.text_input("Enter Custom Width", placeholder="e.g. 9\"", key="custom_width_input")
-            width = validate_width(width)
+        # Size Dropdown
+        size = st.selectbox(
+            "Size (inches) *",
+            options=[2.25, 3.25, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+            help="Select the width of the flooring planks",
+            key="size_select"
+        )
+        
+        # Convert size to width string format
+        width = f'{size}"'
+        product = wood_type
         
         from repositories.customer_repository import CustomerRepository
         from models.base import SessionLocal

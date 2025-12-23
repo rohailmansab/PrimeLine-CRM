@@ -24,27 +24,54 @@ def show_toast(message: str, type: str = "success"):
 def add_customer_dialog():
     repo = get_repository()
     with st.form("add_customer_form"):
+        st.subheader("👤 Contact Information")
         col1, col2 = st.columns(2)
         with col1:
-            full_name = st.text_input("Full Name*")
-            business_name = st.text_input("Business Name")
+            first_name = st.text_input("First Name*")
             email = st.text_input("Email*")
         with col2:
+            last_name = st.text_input("Last Name*")
             phone = st.text_input("Phone*")
-            zip_code = st.text_input("Zip Code*")
+            
+        st.subheader("🏢 Business Information")
+        col3, col4 = st.columns(2)
+        with col3:
+            business_name = st.text_input("Business Name (Optional)")
             customer_type = st.selectbox(
                 "Customer Type", 
                 options=["contractor", "architect", "installer", "diy"],
                 format_func=lambda x: x.title()
             )
-        
-        notes = st.text_area("Notes")
+        with col4:
+            zip_code = st.text_input("Zip Code*")
+            
+        st.subheader("📝 Inquiry Context")
+        col5, col6 = st.columns(2)
+        with col5:
+            service = st.selectbox(
+                "Service",
+                options=[
+                    "Hardwood Flooring", "Engineered Flooring", "Luxury Vinyl Plank (LVP)",
+                    "Laminate Flooring", "Tile/Stone", "Carpet", "Installation Services",
+                    "Refinishing/Repair", "Commercial Project", "Other"
+                ]
+            )
+        with col6:
+            role = st.selectbox(
+                "Role",
+                options=[
+                    "Homeowner", "Contractor / Builder", "Interior Designer",
+                    "Architect", "Property Manager", "Real Estate Agent", "Other"
+                ]
+            )
+            
+        notes = st.text_area("Message / Notes")
         
         submitted = st.form_submit_button("Create Customer", type="primary")
         
         if submitted:
-            if not full_name or not business_name or not email or not phone or not zip_code:
-                st.error("Name, Business Name, Email, Phone, and Zip Code are required.")
+            if not first_name or not last_name or not email or not phone or not zip_code:
+                st.error("First Name, Last Name, Email, Phone, and Zip Code are required.")
                 return
             
             try:
@@ -53,13 +80,21 @@ def add_customer_dialog():
                     st.error("Email already exists.")
                     return
 
+                full_name = f"{first_name} {last_name}"
+                
                 new_customer = CustomerCreate(
+                    first_name=first_name,
+                    last_name=last_name,
                     full_name=full_name,
-                    business_name=business_name,
+                    business_name=business_name if business_name else None,
                     email=email, 
                     phone=phone, 
                     zip_code=zip_code,
                     customer_type=customer_type,
+                    service=service,
+                    role=role,
+                    source="Admin", # System field
+                    status="New",   # System field
                     notes=notes
                 )
                 
@@ -83,17 +118,22 @@ def add_customer_dialog():
                 st.error(f"Error creating customer: {str(e)}")
 
 @st.dialog("Edit Customer")
-def edit_customer_dialog(customer_id, current_name, current_business, current_email, current_phone, current_zip, current_type, current_notes):
+def edit_customer_dialog(customer_id, current_first, current_last, current_full, current_business, current_email, current_phone, current_zip, current_type, current_service, current_role, current_notes):
     repo = get_repository()
     with st.form("edit_customer_form"):
+        st.subheader("👤 Contact Information")
         col1, col2 = st.columns(2)
         with col1:
-            full_name = st.text_input("Full Name*", value=current_name)
-            business_name = st.text_input("Business Name", value=current_business if current_business else "")
+            first_name = st.text_input("First Name*", value=current_first if current_first else "")
             email = st.text_input("Email*", value=current_email)
         with col2:
+            last_name = st.text_input("Last Name*", value=current_last if current_last else "")
             phone = st.text_input("Phone*", value=current_phone if current_phone else "")
-            zip_code = st.text_input("Zip Code*", value=current_zip if current_zip else "")
+            
+        st.subheader("🏢 Business Information")
+        col3, col4 = st.columns(2)
+        with col3:
+            business_name = st.text_input("Business Name (Optional)", value=current_business if current_business else "")
             
             # Handle customer type selection
             type_options = ["contractor", "architect", "installer", "diy"]
@@ -108,14 +148,40 @@ def edit_customer_dialog(customer_id, current_name, current_business, current_em
                 index=type_index,
                 format_func=lambda x: x.title()
             )
+        with col4:
+            zip_code = st.text_input("Zip Code*", value=current_zip if current_zip else "")
             
-        notes = st.text_area("Notes", value=current_notes if current_notes else "")
+        st.subheader("📝 Inquiry Context")
+        col5, col6 = st.columns(2)
+        with col5:
+            service_options = [
+                "Hardwood Flooring", "Engineered Flooring", "Luxury Vinyl Plank (LVP)",
+                "Laminate Flooring", "Tile/Stone", "Carpet", "Installation Services",
+                "Refinishing/Repair", "Commercial Project", "Other"
+            ]
+            try:
+                service_index = service_options.index(current_service) if current_service in service_options else 0
+            except:
+                service_index = 0
+            service = st.selectbox("Service", options=service_options, index=service_index)
+        with col6:
+            role_options = [
+                "Homeowner", "Contractor / Builder", "Interior Designer",
+                "Architect", "Property Manager", "Real Estate Agent", "Other"
+            ]
+            try:
+                role_index = role_options.index(current_role) if current_role in role_options else 0
+            except:
+                role_index = 0
+            role = st.selectbox("Role", options=role_options, index=role_index)
+            
+        notes = st.text_area("Message / Notes", value=current_notes if current_notes else "")
         
         submitted = st.form_submit_button("Update Customer", type="primary")
         
         if submitted:
-            if not full_name or not business_name or not email or not phone or not zip_code:
-                st.error("Name, Business Name, Email, Phone, and Zip Code are required.")
+            if not first_name or not last_name or not email or not phone or not zip_code:
+                st.error("First Name, Last Name, Email, Phone, and Zip Code are required.")
                 return
             
             try:
@@ -125,13 +191,19 @@ def edit_customer_dialog(customer_id, current_name, current_business, current_em
                     st.error("Email already exists.")
                     return
 
+                full_name = f"{first_name} {last_name}"
+                
                 update_data = CustomerUpdate(
+                    first_name=first_name,
+                    last_name=last_name,
                     full_name=full_name,
-                    business_name=business_name,
+                    business_name=business_name if business_name else None,
                     email=email, 
                     phone=phone, 
                     zip_code=zip_code,
                     customer_type=customer_type,
+                    service=service,
+                    role=role,
                     notes=notes
                 )
                 repo.update(customer_id, update_data)
@@ -273,28 +345,37 @@ def render_customer_page():
         st.markdown("---")
         
         for c in customers:
-            cols = st.columns([2, 2, 1.5, 1.5, 1.5, 2, 1, 1])
-            
-            # Name & Business
-            with cols[0]:
-                st.markdown(f"**{c.full_name}**")
-                if c.business_name:
-                    st.caption(f"🏢 {c.business_name}")
-            
-            cols[1].write(c.email)
-            cols[2].write(c.phone or "-")
-            cols[3].write(c.zip_code or "-")
-            cols[4].write(c.customer_type.title() if c.customer_type else "-")
-            
-            # Notes with truncation
-            notes_display = c.notes if c.notes else "-"
-            if len(notes_display) > 30:
-                cols[5].markdown(notes_display[:30] + "...", help=notes_display)
-            else:
-                cols[5].write(notes_display)
-            
-            status_color = "red" if c.is_deleted else "green"
-            cols[6].markdown(f":{status_color}[{'Deleted' if c.is_deleted else 'Active'}]")
+            data.append({
+                "ID": str(c.id),
+                "Name": c.full_name,
+                "Email": c.email,
+                "Phone": c.phone,
+                "Type": c.customer_type.title() if c.customer_type else "N/A",
+                "Source": c.source if c.source else "Admin",
+                "Status": c.status if c.status else "New",
+                "Created": c.created_at.strftime("%Y-%m-%d"),
+                "Is Deleted": "Yes" if c.is_deleted else "No"
+            })
+        
+        # Display as a clean list with actions
+        for c in customers:
+            with st.container():
+                cols = st.columns([2, 2, 2, 1, 1, 1, 1, 2])
+                cols[0].write(f"**{c.full_name}**")
+                cols[1].write(c.email)
+                cols[2].write(c.phone)
+                cols[3].write(c.customer_type.title() if c.customer_type else "N/A")
+                cols[4].write(c.source if c.source else "Admin")
+                
+                # Status with badge-like styling
+                status = c.status if c.status else "New"
+                status_color = "blue" if status == "New" else "green"
+                cols[5].markdown(f":{status_color}[{status}]")
+                
+                # Deleted status
+                del_status = "Deleted" if c.is_deleted else "Active"
+                del_color = "red" if c.is_deleted else "gray"
+                cols[6].markdown(f":{del_color}[{del_status}]")
             
             with cols[7]:
                 if not c.is_deleted:
@@ -309,12 +390,16 @@ def render_customer_page():
                     if action_cols[1].button("✏️", key=f"edit_{c.id}", help="Edit", type="tertiary"):
                         edit_customer_dialog(
                             c.id, 
+                            c.first_name,
+                            c.last_name,
                             c.full_name, 
                             c.business_name,
                             c.email, 
                             c.phone, 
                             c.zip_code,
                             c.customer_type,
+                            c.service,
+                            c.role,
                             c.notes
                         )
                     

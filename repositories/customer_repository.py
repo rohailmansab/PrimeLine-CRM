@@ -20,13 +20,19 @@ class CustomerRepository:
 
     def create(self, customer: CustomerCreate, user_id: int = None) -> Customer:
         db_customer = Customer(
+            first_name=customer.first_name,
+            last_name=customer.last_name,
             full_name=customer.full_name,
             business_name=customer.business_name,
             email=customer.email,
             phone=customer.phone,
             zip_code=customer.zip_code,
             location=customer.location,
-            customer_type=customer.customer_type,
+            customer_type=customer.customer_type.value if hasattr(customer.customer_type, 'value') else customer.customer_type,
+            service=customer.service,
+            role=customer.role,
+            source=customer.source.value if hasattr(customer.source, 'value') else customer.source,
+            status=customer.status.value if hasattr(customer.status, 'value') else customer.status,
             notes=customer.notes,
             user_id=user_id  # Associate with creating user
         )
@@ -119,12 +125,17 @@ class CustomerRepository:
             search = f"%{search_query}%"
             query = query.filter(
                 or_(
+                    Customer.first_name.ilike(search),
+                    Customer.last_name.ilike(search),
                     Customer.full_name.ilike(search),
                     Customer.business_name.ilike(search),
                     Customer.email.ilike(search),
                     Customer.phone.ilike(search),
                     Customer.zip_code.ilike(search),
-                    Customer.location.ilike(search),
+                    Customer.service.ilike(search),
+                    Customer.role.ilike(search),
+                    Customer.source.ilike(search),
+                    Customer.status.ilike(search),
                     Customer.notes.ilike(search)
                 )
             )

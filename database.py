@@ -72,6 +72,8 @@ class Database:
             # Customers table
             c.execute('''CREATE TABLE IF NOT EXISTS customers
                         (id CHAR(32) PRIMARY KEY,
+                         first_name VARCHAR(100),
+                         last_name VARCHAR(100),
                          full_name VARCHAR(255) NOT NULL,
                          email VARCHAR(255) NOT NULL,
                          phone VARCHAR(50),
@@ -82,9 +84,13 @@ class Database:
                          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                          user_id INTEGER,
-                         business_name TEXT NOT NULL,
+                         business_name TEXT,
                          zip_code TEXT,
                          customer_type TEXT DEFAULT 'contractor',
+                         service TEXT,
+                         role TEXT,
+                         source TEXT DEFAULT 'Admin',
+                         status TEXT DEFAULT 'New',
                          FOREIGN KEY(user_id) REFERENCES users(id))''')
             
             c.execute('''CREATE TABLE IF NOT EXISTS products
@@ -249,15 +255,56 @@ class Database:
             # Create index for quote user_id filtering
             c.execute('''CREATE INDEX IF NOT EXISTS idx_quotes_user_id ON quotes(user_id)''')
             
-            # Migration: Add user_id column to existing customers table if it doesn't exist
-            # Check if table exists first (since it might be managed by SQLAlchemy)
-            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='customers'")
-            if c.fetchone():
+            # Migration: Add new columns to existing customers table
+            if c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='customers'").fetchone():
+                # user_id
                 try:
                     c.execute("SELECT user_id FROM customers LIMIT 1")
                 except:
                     c.execute("ALTER TABLE customers ADD COLUMN user_id INTEGER REFERENCES users(id)")
                     print("✓ Added user_id column to customers table")
+                
+                # first_name
+                try:
+                    c.execute("SELECT first_name FROM customers LIMIT 1")
+                except:
+                    c.execute("ALTER TABLE customers ADD COLUMN first_name VARCHAR(100)")
+                    print("✓ Added first_name column to customers table")
+                
+                # last_name
+                try:
+                    c.execute("SELECT last_name FROM customers LIMIT 1")
+                except:
+                    c.execute("ALTER TABLE customers ADD COLUMN last_name VARCHAR(100)")
+                    print("✓ Added last_name column to customers table")
+                
+                # service
+                try:
+                    c.execute("SELECT service FROM customers LIMIT 1")
+                except:
+                    c.execute("ALTER TABLE customers ADD COLUMN service TEXT")
+                    print("✓ Added service column to customers table")
+                
+                # role
+                try:
+                    c.execute("SELECT role FROM customers LIMIT 1")
+                except:
+                    c.execute("ALTER TABLE customers ADD COLUMN role TEXT")
+                    print("✓ Added role column to customers table")
+                
+                # source
+                try:
+                    c.execute("SELECT source FROM customers LIMIT 1")
+                except:
+                    c.execute("ALTER TABLE customers ADD COLUMN source TEXT DEFAULT 'Admin'")
+                    print("✓ Added source column to customers table")
+                
+                # status
+                try:
+                    c.execute("SELECT status FROM customers LIMIT 1")
+                except:
+                    c.execute("ALTER TABLE customers ADD COLUMN status TEXT DEFAULT 'New'")
+                    print("✓ Added status column to customers table")
             
             # Migration: Add is_active column to suppliers table if it doesn't exist
             try:

@@ -47,13 +47,19 @@ class Customer(Base):
     __tablename__ = "customers"
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    first_name = Column(String(100), nullable=True)
+    last_name = Column(String(100), nullable=True)
     full_name = Column(String(255), index=True, nullable=False)
-    business_name = Column(String(255), nullable=False)
+    business_name = Column(String(255), nullable=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
     phone = Column(String(50), nullable=False) # Made mandatory per requirements
     zip_code = Column(String(20), nullable=False) # Made mandatory per requirements
     location = Column(String(255), nullable=True) # Deprecated in favor of zip_code
     customer_type = Column(String(50), default='contractor')
+    service = Column(String(100), nullable=True)
+    role = Column(String(100), nullable=True)
+    source = Column(String(50), default='Admin')
+    status = Column(String(50), default='New')
     notes = Column(Text, nullable=True)
     
     # User association - nullable for backward compatibility
